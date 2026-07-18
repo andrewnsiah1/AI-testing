@@ -71,10 +71,3 @@ Push the `frontend/` directory to GitHub Pages, or use the included GitHub Actio
 The backend Lambda needs:
 - `BEDROCK_KNOWLEDGE_BASE_ID` — Your Knowledge Base ID
 - `BEDROCK_MODEL_ID` — e.g., `anthropic.claude-3-sonnet-20240229-v1:0`
-
-## External Setup Required
-
-1. **Enable Bedrock Model Access** — In AWS Console → Bedrock → Model Access, enable Claude
-2. **Create Knowledge Base** — CDK handles this, but you need to upload AWS docs to S3 first
-3. **GitHub Pages** — Enable in your repo settings (Settings → Pages → Source: main branch, /frontend folder)
-4. **CORS** — API Gateway is configured to allow requests from your GitHub Pages domain
