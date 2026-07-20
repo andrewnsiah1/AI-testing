@@ -925,16 +925,37 @@ function checkCollisions() {
       const isFatal = strikeCount >= 1;
 
       if (isFatal) {
+        // Fatal second hit — freeze world, wait for landing if mid-jump,
+        // then play fall-back death.
         gameState = 'dying';
-        player.playFallBackDeath().then(() => {
-          gameOver('Stumbled one too many times.');
-        });
+        const waitForLanding = () => {
+          if (player.isJumping) {
+            requestAnimationFrame(waitForLanding);
+            player.update();
+            renderer.render(scene, camera);
+          } else {
+            player.playFallBackDeath().then(() => {
+              gameOver('Stumbled one too many times.');
+            });
+          }
+        };
+        waitForLanding();
       } else {
-        player.playStumble().then(() => {
-          stumbleActive = false;
-          if (gameState !== 'playing') return;
-          registerStrike();
-        });
+        // First hit — wait for landing then play stumble.
+        const waitForLandingThenStumble = () => {
+          if (player.isJumping) {
+            requestAnimationFrame(waitForLandingThenStumble);
+            player.update();
+            renderer.render(scene, camera);
+          } else {
+            player.playStumble().then(() => {
+              stumbleActive = false;
+              if (gameState !== 'playing') return;
+              registerStrike();
+            });
+          }
+        };
+        waitForLandingThenStumble();
       }
       return;
     }
