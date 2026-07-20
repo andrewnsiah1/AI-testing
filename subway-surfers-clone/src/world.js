@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+const BASE = import.meta.env.BASE_URL;
 const LANE_WIDTH = 3;
 
 export class World {
@@ -23,7 +24,7 @@ export class World {
     const texLoader = new THREE.TextureLoader();
     const files = ['variation-a.png', 'variation-b.png', 'variation-c.png'];
     for (const file of files) {
-      const tex = texLoader.load(`/models/Textures/${file}`);
+      const tex = texLoader.load(`${BASE}models/Textures/${file}`);
       tex.flipY = false; // glTF textures are not flipped
       tex.colorSpace = THREE.SRGBColorSpace;
       this.colorVariations.push(tex);
@@ -91,7 +92,7 @@ export class World {
     let loadedCount = 0;
     for (const name of buildingFiles) {
       try {
-        const gltf = await loader.loadAsync(`/models/${name}.glb`);
+        const gltf = await loader.loadAsync(`${BASE}models/${name}.glb`);
         const model = gltf.scene;
         model.traverse((child) => {
           if (child.isMesh) {
