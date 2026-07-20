@@ -916,7 +916,8 @@ function checkCollisions() {
             renderer.render(scene, camera);
           } else {
             player.playFallBackDeath().then(() => {
-              gameOver('Hit by a train.');
+              // Brief pause so the player sees the death pose before the UI covers it
+              setTimeout(() => gameOver('Hit by a train.'), 600);
             });
           }
         };
@@ -940,7 +941,7 @@ function checkCollisions() {
             renderer.render(scene, camera);
           } else {
             player.playFallBackDeath().then(() => {
-              gameOver('Stumbled one too many times.');
+              setTimeout(() => gameOver('Stumbled one too many times.'), 600);
             });
           }
         };
@@ -1112,8 +1113,9 @@ function animate() {
   }
 
   // 'over' state: keep cop's idle animation ticking
-  if (gameState === 'over' && cop.active) {
-    cop.update(player);
+  if (gameState === 'over') {
+    player.update();
+    if (cop.active) cop.update(player);
   }
 
   renderer.render(scene, camera);
