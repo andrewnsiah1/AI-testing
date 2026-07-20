@@ -48,7 +48,7 @@ class RateLimiter:
                 status_code=429,
                 detail={
                     "error": "rate_limit_exceeded",
-                    "message": "The wizard needs a moment to rest. Please slow down and try again shortly.",
+                    "message": "Too many requests. Please slow down and try again shortly.",
                     "retry_after_seconds": self.window_seconds,
                 },
             )

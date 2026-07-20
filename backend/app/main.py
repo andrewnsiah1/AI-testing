@@ -1,18 +1,24 @@
-"""FastAPI application - main entry point for the AWS Wizard Game backend."""
+"""FastAPI application - main entry point for the Cloud Runner backend."""
 
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
-from .models import ChatRequest, ChatResponse, PlayerState
-from .wizard import ask_wizard
-from .game import process_game_turn, QUESTS, ACHIEVEMENTS, LEVELS
+from .models import (
+    QuizRequest,
+    QuizResponse,
+    LaneQuizRequest,
+    LaneQuizResponse,
+    AskQuestionRequest,
+    AskQuestionResponse,
+)
+from .ai import generate_quiz_question, generate_lane_quiz, ask_about_service
 from .rate_limit import rate_limiter
 
 app = FastAPI(
-    title="AWS Wizard Game API",
-    description="Backend API for the AWS Wizard interactive learning game",
+    title="Cloud Runner API",
+    description="Backend API for Cloud Runner's in-game AI features (quiz generation, follow-up Q&A)",
     version="1.0.0",
 )
 
@@ -33,64 +39,85 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "alive", "wizard": "Cloudius the Eternal awaits"}
+    return {"status": "alive"}
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, raw_request: Request):
+@app.post("/quiz", response_model=QuizResponse)
+async def quiz(request: QuizRequest, raw_request: Request):
     """
-    Main chat endpoint. Processes a message through the wizard AI
-    and updates game state.
+    Generate a dynamic 4-choice quiz question for a service collected in the
+    Cloud Runner mini-game. Falls back to a 502 if generation fails -
+    the frontend should catch this and use its static question bank.
     """
-    # Rate limit: 20 requests/min per IP
     rate_limiter.check(raw_request)
 
-    # Initialize player state if not provided
-    player_state = request.player_state or PlayerState()
+    try:
+        quiz_data = await generate_quiz_question(
+            service_id=request.service_id,
+            service_name=request.service_name,
+            category=request.category,
+            difficulty=request.difficulty,
+        )
+    except Exception as e:
+        print(f"Quiz generation failed for {request.service_id}: {e}")
+        raise HTTPException(status_code=502, detail="Quiz generation failed")
 
-    # Process game mechanics (XP, quests, achievements)
-    player_state, xp_events, quest_updates, new_achievements = process_game_turn(
-        player_state, request.message
-    )
-
-    # Get wizard response from Bedrock
-    wizard_reply, sources = await ask_wizard(
-        message=request.message,
-        player_state=player_state,
-        conversation_history=request.conversation_history,
-    )
-
-    return ChatResponse(
-        message=wizard_reply,
-        sources=sources,
-        player_state=player_state,
-        xp_events=xp_events,
-        quest_updates=quest_updates,
-        new_achievements=new_achievements,
+    return QuizResponse(
+        question=quiz_data["question"],
+        choices=quiz_data["choices"],
+        correct_index=quiz_data["correct_index"],
+        fact=quiz_data["fact"],
     )
 
 
-@app.get("/quests")
-async def get_quests():
-    """Get all available quests."""
-    return {"quests": QUESTS}
+@app.post("/lane-quiz", response_model=LaneQuizResponse)
+async def lane_quiz(request: LaneQuizRequest, raw_request: Request):
+    """
+    Generate a 3-choice quiz question for the in-run lane-gate mechanic.
+    Each choice maps to a lane (left/center/right) the player runs into to answer.
+    """
+    rate_limiter.check(raw_request)
+
+    try:
+        quiz_data = await generate_lane_quiz(
+            service_id=request.service_id,
+            service_name=request.service_name,
+            category=request.category,
+            difficulty=request.difficulty,
+        )
+    except Exception as e:
+        print(f"Lane quiz generation failed for {request.service_id}: {e}")
+        raise HTTPException(status_code=502, detail="Lane quiz generation failed")
+
+    return LaneQuizResponse(
+        question=quiz_data["question"],
+        choices=quiz_data["choices"],
+        correct_index=quiz_data["correct_index"],
+        fact=quiz_data["fact"],
+    )
 
 
-@app.get("/achievements")
-async def get_achievements():
-    """Get all available achievements (without condition functions)."""
-    return {
-        "achievements": {
-            k: {"name": v["name"], "description": v["description"]}
-            for k, v in ACHIEVEMENTS.items()
-        }
-    }
+@app.post("/ask", response_model=AskQuestionResponse)
+async def ask(request: AskQuestionRequest, raw_request: Request):
+    """
+    Answer a free-text follow-up question scoped to a specific service,
+    asked from the Cloud Runner "learn more" panel.
+    """
+    rate_limiter.check(raw_request)
 
+    try:
+        answer, sources = await ask_about_service(
+            service_id=request.service_id,
+            service_name=request.service_name,
+            category=request.category,
+            question=request.question,
+            conversation_history=request.conversation_history,
+        )
+    except Exception as e:
+        print(f"Ask-question failed for {request.service_id}: {e}")
+        raise HTTPException(status_code=502, detail="Question answering failed")
 
-@app.get("/levels")
-async def get_levels():
-    """Get level thresholds."""
-    return {"levels": [{"threshold": t, "name": n} for t, n in LEVELS]}
+    return AskQuestionResponse(answer=answer, sources=sources)
 
 
 # Lambda handler via Mangum

@@ -1,10 +1,10 @@
-"""CDK Stack for the AWS Wizard Game backend.
+"""CDK Stack for the Cloud Runner backend.
 
 Provisions:
 - S3 bucket for AWS documentation (Knowledge Base source)
-- Lambda function running FastAPI
+- Lambda function running FastAPI (quiz generation, follow-up Q&A, grounded by RAG)
 - API Gateway HTTP API
-- IAM roles with Bedrock access
+- IAM role with Bedrock InvokeModel + Retrieve access
 """
 
 from aws_cdk import (
@@ -26,7 +26,7 @@ class BackendStack(Stack):
 
         # Pull sensitive/environment-specific config from CDK context
         kb_id = self.node.try_get_context("kb_id") or ""
-        github_pages_url = self.node.try_get_context("github_pages_url") or "http://localhost:3000"
+        game_url = self.node.try_get_context("game_url") or "http://localhost:3000"
 
         # ============================================================
         # S3 Bucket for AWS documentation (Knowledge Base data source)
@@ -35,7 +35,7 @@ class BackendStack(Stack):
         docs_bucket = s3.Bucket.from_bucket_name(
             self,
             "DocsDataSource",
-            bucket_name=f"aws-wizard-game-docs-{self.account}",
+            bucket_name=f"cloud-runner-docs-{self.account}",
         )
 
         # ============================================================
@@ -43,7 +43,7 @@ class BackendStack(Stack):
         # ============================================================
         api_lambda = lambda_.Function(
             self,
-            "WizardApiFunction",
+            "CloudRunnerApiFunction",
             runtime=lambda_.Runtime.PYTHON_3_11,
             handler="app.main.handler",
             code=lambda_.Code.from_asset("../backend/package"),
@@ -52,12 +52,12 @@ class BackendStack(Stack):
             environment={
                 "BEDROCK_KNOWLEDGE_BASE_ID": kb_id,
                 "BEDROCK_MODEL_ID": "anthropic.claude-3-sonnet-20240229-v1:0",
-                "ALLOWED_ORIGINS": github_pages_url,
+                "ALLOWED_ORIGINS": game_url,
             },
-            description="AWS Wizard Game - FastAPI backend",
+            description="Cloud Runner - FastAPI backend for quiz generation and follow-up Q&A, grounded by a Bedrock Knowledge Base",
         )
 
-        # Grant Bedrock permissions
+        # Grant Bedrock permissions (InvokeModel for generation, Retrieve for RAG)
         api_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
@@ -77,15 +77,15 @@ class BackendStack(Stack):
         # ============================================================
         http_api = apigwv2.HttpApi(
             self,
-            "WizardHttpApi",
-            api_name="aws-wizard-game-api",
+            "CloudRunnerHttpApi",
+            api_name="cloud-runner-api",
             cors_preflight=apigwv2.CorsPreflightOptions(
-                allow_origins=[github_pages_url, "http://localhost:3000"],
+                allow_origins=[game_url, "http://localhost:3000"],
                 allow_methods=[apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.POST, apigwv2.CorsHttpMethod.OPTIONS],
                 allow_headers=["Content-Type", "Authorization"],
                 max_age=Duration.hours(1),
             ),
-            description="HTTP API for the AWS Wizard Game",
+            description="HTTP API for Cloud Runner's in-game AI features",
         )
 
         # Throttle: 10 requests/sec burst, 5 requests/sec sustained per client
@@ -101,28 +101,23 @@ class BackendStack(Stack):
 
         # Routes
         http_api.add_routes(
-            path="/chat",
-            methods=[apigwv2.HttpMethod.POST],
-            integration=integration,
-        )
-        http_api.add_routes(
             path="/health",
             methods=[apigwv2.HttpMethod.GET],
             integration=integration,
         )
         http_api.add_routes(
-            path="/quests",
-            methods=[apigwv2.HttpMethod.GET],
+            path="/quiz",
+            methods=[apigwv2.HttpMethod.POST],
             integration=integration,
         )
         http_api.add_routes(
-            path="/achievements",
-            methods=[apigwv2.HttpMethod.GET],
+            path="/lane-quiz",
+            methods=[apigwv2.HttpMethod.POST],
             integration=integration,
         )
         http_api.add_routes(
-            path="/levels",
-            methods=[apigwv2.HttpMethod.GET],
+            path="/ask",
+            methods=[apigwv2.HttpMethod.POST],
             integration=integration,
         )
 
@@ -133,11 +128,11 @@ class BackendStack(Stack):
             self,
             "ApiUrl",
             value=http_api.url or "",
-            description="API Gateway endpoint URL - set this in frontend/js/config.js",
+            description="API Gateway endpoint URL - set this in subway-surfers-clone/src/quizApi.js",
         )
         CfnOutput(
             self,
             "DocsBucketName",
             value=docs_bucket.bucket_name,
-            description="S3 bucket for uploading AWS documentation",
+            description="S3 bucket for uploading AWS documentation used by the Knowledge Base",
         )

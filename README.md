@@ -1,38 +1,20 @@
-# AWS Wizard Game 🧙‍♂️☁️
+# Cloud Runner ☁️🏃
 
-An interactive fantasy-themed learning game where an AI wizard teaches you AWS concepts through conversation. Ask questions, earn XP, complete quests, and unlock deeper knowledge.
-
-**[▶️ Play Now](https://andrewnsiah1.github.io/AI-testing/)**
+An educational Subway Surfers-style endless runner that teaches real AWS concepts while you play. Collect AWS service orbs, answer in-run quiz gates, and review what you learned between runs.
 
 ## How to Play
 
-1. Open the link above — no account or setup needed
-2. Type a question about any AWS service (e.g., "What is EC2?", "Explain Lambda", "How do VPCs work?")
-3. The wizard answers in a fantasy style with real, accurate AWS knowledge
-4. Keep asking questions to earn XP and level up!
-
-**Game tips:**
-- Ask about **different services** to discover new topics and start quests
-- Complete quests by exploring related services (e.g., ask about EC2, Lambda, and ECS to complete "The Compute Trials")
-- **Follow up** on topics for bonus deep-dive XP
-- Your progress saves automatically in your browser — come back anytime
-
-**Available quests:**
-| Quest | What to Ask About |
-|-------|------------------|
-| The Compute Trials | EC2, Lambda, ECS/EKS |
-| Secrets of the Network | VPC, Subnets, Security Groups |
-| The Storage Vault | S3, EBS, EFS |
-| The Database Dungeon | RDS, DynamoDB, ElastiCache |
-| The Security Ward | IAM, KMS, Secrets Manager |
-| The Serverless Sanctum | Lambda, API Gateway, Step Functions |
+1. Run the game locally (see below) or open your deployed build
+2. Dodge obstacles, collect AWS service orbs, and run into lane gates to answer quiz questions as they pop up
+3. After each run, review a lesson recap of everything you collected and ask follow-up questions
+4. Quiz difficulty scales with your score — the further you get, the harder the questions
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  GitHub Pages   │────▶│  API Gateway +   │────▶│ Amazon Bedrock  │
-│  (Frontend)     │◀────│  Lambda (FastAPI) │◀────│ Knowledge Base  │
+│  Cloud Runner   │────▶│  API Gateway +   │────▶│ Amazon Bedrock  │
+│  (Three.js game)│◀────│  Lambda (FastAPI) │◀────│ Knowledge Base  │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                                          │
                                                          ▼
@@ -44,32 +26,49 @@ An interactive fantasy-themed learning game where an AI wizard teaches you AWS c
 ## Project Structure
 
 ```
-aws-wizard-game/
-├── frontend/           # Static site for GitHub Pages
-│   ├── index.html      # Main game interface
-│   ├── css/            # Fantasy-themed styles
-│   ├── js/             # Game logic, chat, XP system
-│   └── assets/         # Images, icons
-├── backend/            # Python FastAPI Lambda
-│   ├── app/            # Application code
-│   │   ├── main.py     # FastAPI routes
-│   │   ├── wizard.py   # AI wizard persona + Bedrock integration
-│   │   ├── game.py     # Game mechanics (XP, quests, levels)
-│   │   └── models.py   # Pydantic models
+cloud-runner/
+├── subway-surfers-clone/   # The game (Three.js + Vite)
+│   ├── src/                # Game logic, quiz gates, services data
+│   └── public/models/      # 3D models
+├── backend/                 # Python FastAPI Lambda
+│   ├── app/
+│   │   ├── main.py         # FastAPI routes
+│   │   ├── ai.py           # Bedrock integration (quiz generation, Q&A, RAG)
+│   │   ├── models.py       # Pydantic models
+│   │   └── rate_limit.py
 │   ├── requirements.txt
 │   └── Dockerfile
-├── infra/              # AWS CDK infrastructure
+├── infra/                   # AWS CDK infrastructure
 │   ├── app.py
 │   └── stacks/
-├── data/               # AWS documentation for Knowledge Base
-│   └── sources.json    # Doc URLs to ingest
-└── README.md
+├── data/                     # AWS documentation for the Knowledge Base
+│   └── sources.json
+└── dev.sh
 ```
 
-## Game Mechanics
+## Local Development
 
-- **XP System**: Earn XP for asking questions, completing quests, exploring new topics
-- **Levels**: Apprentice → Journeyman → Adept → Mage → Archmage
-- **Quests**: Themed learning paths (e.g., "The Compute Trials", "Secrets of the Network")
-- **Achievements**: Special badges for milestones
-- **Topic Tree**: Unlock deeper topics as you level up
+```bash
+./dev.sh backend   # starts FastAPI on :8000
+./dev.sh game      # starts the Vite dev server on :3000
+```
+
+The game works without the backend running — it falls back to a static question bank in `subway-surfers-clone/src/services.js` when the API is unreachable.
+
+## Backend API
+
+- `POST /quiz` — generates a 4-choice quiz question for a collected service (end-of-run lesson)
+- `POST /lane-quiz` — generates a 3-choice quiz question for the in-run lane-gate mechanic
+- `POST /ask` — answers a free-text follow-up question about a specific service
+- `GET /health` — health check
+
+All generation is grounded by a Bedrock Knowledge Base (RAG) over real AWS documentation when `BEDROCK_KNOWLEDGE_BASE_ID` is configured, so answers stay accurate rather than relying purely on model knowledge.
+
+## Deploying
+
+```bash
+cd backend && ./package.sh
+cd ../infra && cdk deploy
+```
+
+Then update the API URL in `subway-surfers-clone/src/quizApi.js`.
