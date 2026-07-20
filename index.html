@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>City Runner</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      overflow: hidden;
+      background: #1a1a2e;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    #game-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    #ui {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      color: white;
+      font-size: 24px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      z-index: 10;
+      pointer-events: none;
+    }
+    #score {
+      font-size: 32px;
+      font-weight: bold;
+    }
+    #strike-indicator {
+      font-size: 15px;
+      margin-top: 4px;
+      min-height: 20px;
+      color: #ff6b6b;
+      font-weight: 600;
+    }
+    #game-over {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      text-align: center;
+      z-index: 20;
+      display: none;
+    }
+    #game-over h1 {
+      font-size: 64px;
+      margin-bottom: 20px;
+      color: #ff6b6b;
+    }
+    #game-over p {
+      font-size: 24px;
+      margin-bottom: 30px;
+    }
+    .btn {
+      padding: 15px 40px;
+      font-size: 20px;
+      background: #4ecdc4;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      cursor: pointer;
+      transition: transform 0.1s;
+      pointer-events: auto;
+    }
+    .btn:hover {
+      transform: scale(1.05);
+    }
+    #start-screen {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      text-align: center;
+      z-index: 20;
+    }
+    #start-screen h1 {
+      font-size: 56px;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #4ecdc4, #44a08d);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #start-screen p {
+      font-size: 18px;
+      margin-bottom: 30px;
+      opacity: 0.8;
+    }
+    /* Rules/How-to-play screen */
+    #rules-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 20, 0.95);
+      z-index: 25;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    #rules-box {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 36px 40px;
+      max-width: 560px;
+      width: 90%;
+      color: white;
+      text-align: left;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    #rules-box h1 {
+      font-size: 30px;
+      margin-bottom: 20px;
+      color: #4ecdc4;
+      text-align: center;
+    }
+    .rules-section {
+      margin-bottom: 18px;
+    }
+    .rules-heading {
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #4ecdc4;
+      margin-bottom: 6px;
+    }
+    .rules-list {
+      padding-left: 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      opacity: 0.9;
+    }
+    .rules-list li {
+      margin-bottom: 4px;
+    }
+    #rules-box .btn {
+      display: block;
+      margin: 20px auto 0;
+    }
+    #loading {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-size: 14px;
+      opacity: 0.7;
+      z-index: 30;
+    }
+
+    /* Service chips shown on game-over / summary */
+    .service-chip {
+      display: inline-block;
+      padding: 6px 14px;
+      margin: 4px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: white;
+    }
+
+    #services-collected {
+      margin: 15px 0 25px;
+      max-width: 500px;
+    }
+
+    /* Lesson screen */
+    #lesson-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 20, 0.95);
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    #lesson-box {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 600px;
+      width: 90%;
+      color: white;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    #lesson-box h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+      color: #4ecdc4;
+    }
+    .lesson-subtitle {
+      font-size: 14px;
+      opacity: 0.7;
+      margin-bottom: 25px;
+    }
+    #lesson-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 25px;
+    }
+    .lesson-card {
+      background: #0f3460;
+      border-radius: 10px;
+      padding: 16px 20px;
+      text-align: left;
+      border-left: 5px solid;
+    }
+    .lesson-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .lesson-card-name {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .lesson-card-category {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.7;
+    }
+    .lesson-card-fact {
+      font-size: 15px;
+      line-height: 1.5;
+      opacity: 0.9;
+    }
+    .lesson-card-toggle {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #4ecdc4;
+      cursor: pointer;
+      user-select: none;
+    }
+    .lesson-card-toggle:hover {
+      text-decoration: underline;
+    }
+    .lesson-card-details {
+      display: none;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+    }
+    .lesson-card-details.open {
+      display: block;
+    }
+    .lesson-detail-section {
+      margin-bottom: 12px;
+    }
+    .lesson-detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.6;
+      margin-bottom: 4px;
+    }
+    .lesson-detail-text {
+      font-size: 14px;
+      line-height: 1.5;
+      opacity: 0.9;
+    }
+    .lesson-detail-loading {
+      font-size: 13px;
+      opacity: 0.6;
+      font-style: italic;
+    }
+    .lesson-ask-form {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .lesson-ask-input {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.05);
+      color: white;
+      font-size: 13px;
+    }
+    .lesson-ask-input::placeholder {
+      color: rgba(255,255,255,0.4);
+    }
+    .lesson-ask-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #4ecdc4;
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .lesson-ask-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .lesson-ask-answer {
+      margin-top: 10px;
+      font-size: 14px;
+      line-height: 1.5;
+      opacity: 0.9;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    /* Orb pickup toast — brief micro-lesson shown when a notes orb is collected */
+    #orb-toast {
+      position: fixed;
+      top: 90px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      z-index: 25;
+      background: #16213e;
+      border: 2px solid #4ecdc4;
+      border-radius: 12px;
+      padding: 12px 20px;
+      max-width: 420px;
+      width: 90%;
+      color: white;
+      text-align: center;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    #orb-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    #orb-toast-name {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    #orb-toast-fact {
+      font-size: 13px;
+      line-height: 1.4;
+      opacity: 0.9;
+    }
+
+    /* In-run lane quiz popup */
+    #lane-quiz-popup {
+      position: fixed;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 35;
+      display: none;
+      background: #16213e;
+      border: 2px solid #4ecdc4;
+      border-radius: 16px;
+      padding: 24px 30px;
+      max-width: 480px;
+      width: 90%;
+      color: white;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    }
+    #lane-quiz-question {
+      font-size: 19px;
+      line-height: 1.4;
+      margin-bottom: 18px;
+    }
+    #lane-quiz-choices {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .lane-quiz-choice {
+      padding: 10px 16px;
+      border-radius: 8px;
+      background: #0f3460;
+      border: 2px solid transparent;
+      font-size: 15px;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .lane-quiz-choice .lane-tag {
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0.6;
+      min-width: 46px;
+    }
+    .lane-quiz-choice.selected {
+      background: #1a4d80;
+      border-color: #4ecdc4;
+    }
+    #lane-quiz-hint {
+      font-size: 12px;
+      opacity: 0.6;
+    }
+    #lane-quiz-notes-toggle {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #4ecdc4;
+      cursor: pointer;
+      user-select: none;
+    }
+    #lane-quiz-notes-toggle:hover {
+      text-decoration: underline;
+    }
+    #lane-quiz-notes-panel {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      text-align: left;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    #lane-quiz-notes-panel.open {
+      display: block;
+    }
+    #lane-quiz-no-notes {
+      font-size: 13px;
+      opacity: 0.65;
+      font-style: italic;
+    }
+    #lane-quiz-loading {
+      position: fixed;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 35;
+      display: none;
+      background: #16213e;
+      border-radius: 16px;
+      padding: 18px 26px;
+      color: white;
+      font-size: 14px;
+      opacity: 0.85;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    #lane-quiz-result {
+      position: fixed;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 36;
+      display: none;
+      background: #16213e;
+      border-radius: 16px;
+      padding: 16px 26px;
+      color: white;
+      font-size: 15px;
+      text-align: center;
+      max-width: 420px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      border: 2px solid;
+    }
+    #lane-quiz-result.correct {
+      border-color: #2ecc71;
+    }
+    #lane-quiz-result.incorrect {
+      border-color: #ff6b6b;
+    }
+    #lane-quiz-result .result-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    #lane-quiz-result-hint {
+      margin-top: 10px;
+      font-size: 12px;
+      opacity: 0.6;
+    }
+    #lane-quiz-result.correct .result-title {
+      color: #2ecc71;
+    }
+    #lane-quiz-result.incorrect .result-title {
+      color: #ff6b6b;
+    }
+
+    /* Summary screen */
+    #summary-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 20, 0.92);
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #summary-box {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 550px;
+      width: 90%;
+      color: white;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    #summary-box h1 {
+      font-size: 36px;
+      margin-bottom: 15px;
+      color: #4ecdc4;
+    }
+    #summary-stats {
+      font-size: 16px;
+      opacity: 0.85;
+      margin-bottom: 20px;
+    }
+    #summary-services {
+      margin-bottom: 25px;
+      max-width: 500px;
+    }
+    /* Quiz review section */
+    #quiz-review {
+      text-align: left;
+      margin-bottom: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .quiz-review-item {
+      border-radius: 8px;
+      margin-bottom: 8px;
+      border-left: 4px solid;
+    }
+    .quiz-review-item.correct {
+      border-color: #2ecc71;
+    }
+    .quiz-review-item.incorrect {
+      border-color: #ff6b6b;
+    }
+    .quiz-review-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .quiz-review-header:hover {
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+    .quiz-review-dot {
+      font-size: 16px;
+      font-weight: 700;
+      min-width: 20px;
+    }
+    .quiz-review-item.correct .quiz-review-dot {
+      color: #2ecc71;
+    }
+    .quiz-review-item.incorrect .quiz-review-dot {
+      color: #ff6b6b;
+    }
+    .quiz-review-question {
+      flex: 1;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .quiz-review-toggle {
+      font-size: 13px;
+      opacity: 0.5;
+      min-width: 14px;
+    }
+    .quiz-review-explanation {
+      display: none;
+      padding: 0 12px 10px 40px;
+      font-size: 13px;
+      line-height: 1.5;
+      opacity: 0.85;
+    }
+    .quiz-review-explanation.open {
+      display: block;
+    }
+  </style>
+  <script type="module" crossorigin src="/AI-testing/assets/index-PuYrb-9J.js"></script>
+</head>
+<body>
+  <div id="game-canvas"></div>
+
+  <div id="ui">
+    <div id="score">0</div>
+    <div id="coins">Coins: 0</div>
+    <div id="strike-indicator"></div>
+  </div>
+
+  <div id="start-screen">
+    <h1>CLOUD RUNNER</h1>
+    <p>Learn AWS while you run.</p>
+    <button class="btn" id="how-to-play-btn">HOW TO PLAY</button>
+  </div>
+
+  <div id="rules-screen">
+    <div id="rules-box">
+      <h1>How to Play</h1>
+      <div class="rules-section">
+        <div class="rules-heading">Controls</div>
+        <ul class="rules-list">
+          <li><strong>← → or A/D</strong> — Switch lanes</li>
+          <li><strong>↑ or W or Space</strong> — Jump over barriers</li>
+          <li><strong>↓ or S</strong> — Slide under overhead bars</li>
+          <li><strong>Enter</strong> — Confirm quiz answer</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <div class="rules-heading">Orbs &amp; Learning</div>
+        <ul class="rules-list">
+          <li>Colored orbs spawn before each quiz — grab them to unlock notes about an AWS service.</li>
+          <li>When a quiz pops up, you can open your collected notes to help answer it.</li>
+          <li>Questions only test what you've been taught — reading your notes is always enough to answer.</li>
+          <li>The more questions you get right for a service, the harder its questions become.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <div class="rules-heading">Strikes &amp; Lives</div>
+        <ul class="rules-list">
+          <li>You get <strong>two lives</strong>. Hitting a barrier or overhead obstacle (or answering wrong) costs one.</li>
+          <li>After your first strike a cop starts chasing you — answer 2 questions correctly in a row to lose the cop and reset your strikes.</li>
+          <li>A second strike of any kind ends the run.</li>
+          <li>Running into a <strong>train</strong> always ends the run instantly.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <div class="rules-heading">Goal</div>
+        <ul class="rules-list">
+          <li>Run as far as you can, collect coins, grab orbs, and answer quizzes to learn real AWS concepts.</li>
+          <li>At the end of each run you'll see a full review of every question you were asked.</li>
+        </ul>
+      </div>
+      <button class="btn" id="rules-start-btn">START</button>
+    </div>
+  </div>
+
+  <div id="game-over">
+    <h1>GAME OVER</h1>
+    <p id="game-over-reason" style="opacity:0.8; font-size:16px; margin-bottom: 10px;"></p>
+    <p>Score: <span id="final-score">0</span></p>
+    <p>Coins: <span id="final-coins">0</span></p>
+    <button class="btn" id="continue-btn">CONTINUE</button>
+  </div>
+
+  <div id="lesson-screen">
+    <div id="lesson-box">
+      <h1>What You Ran Into</h1>
+      <p class="lesson-subtitle">Take a moment to read through these before the quiz.</p>
+      <div id="lesson-cards"></div>
+      <button class="btn" id="lesson-continue-btn">CONTINUE</button>
+    </div>
+  </div>
+
+  <div id="summary-screen">
+    <div id="summary-box">
+      <h1>Run Complete</h1>
+      <p id="summary-stats"></p>
+      <div id="summary-services"></div>
+      <div id="quiz-review"></div>
+      <button class="btn" id="restart-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <div id="orb-toast">
+    <div id="orb-toast-name"></div>
+    <div id="orb-toast-fact"></div>
+  </div>
+
+  <div id="lane-quiz-loading">Loading question...</div>
+
+  <div id="lane-quiz-popup">
+    <div id="lane-quiz-question"></div>
+    <div id="lane-quiz-choices"></div>
+    <div id="lane-quiz-hint">Use ← → to select, then press ENTER to run for your answer</div>
+    <span id="lane-quiz-notes-toggle">View notes ▾</span>
+    <div id="lane-quiz-notes-panel">
+      <div id="lane-quiz-no-notes">You didn't grab the notes orb for this one — answering from memory.</div>
+      <div id="lane-quiz-notes-sections"></div>
+    </div>
+  </div>
+
+  <div id="lane-quiz-result">
+    <div class="result-title" id="lane-quiz-result-title"></div>
+    <div id="lane-quiz-result-fact"></div>
+    <div id="lane-quiz-result-hint">Press ENTER to continue</div>
+  </div>
+
+  <div id="loading">Loading models...</div>
+
+</body>
+</html>
