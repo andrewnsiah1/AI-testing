@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { SERVICES, CATEGORIES } from './services.js';
+
+// Plain currency pickups — no AWS service or lesson content attached.
+// (Service-linked collectibles are handled separately by orbs.js, which
+// power the in-run quiz/lesson mechanic.)
 
 const LANE_WIDTH = 3;
 const LANES = [LANE_WIDTH, 0, -LANE_WIDTH];
@@ -9,45 +12,28 @@ const DESPAWN_DISTANCE = -15;
 const COIN_HEIGHT_NORMAL = 1.5;
 const COIN_HEIGHT_SLIDE = 0.5; // low coins under overhead obstacles
 const COIN_SPACING = 2.5; // space between coins in a line
+const COIN_COLOR = 0xffd700;
 
 export class CoinManager {
-  constructor(scene, obstacleManager, onCollect) {
+  constructor(scene, obstacleManager) {
     this.scene = scene;
     this.obstacleManager = obstacleManager;
-    this.onCollect = onCollect; // callback(service) fired when a coin is collected
     this.coins = [];
     this.lastSpawnScore = 0;
     this.spawnInterval = 20; // score units between spawns (less frequent = less congested)
     this.lastSpawnLane = -1; // track last lane to avoid repetition
-    this.lastServiceId = null; // avoid repeating the same service back-to-back
 
     this.coinModel = null;
     this.coinGeo = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
-
-    this.loadModel();
-  }
-
-  // Pick a service for a new coin group, preferring one different from the last
-  pickService() {
-    let service;
-    let attempts = 0;
-    do {
-      service = SERVICES[Math.floor(Math.random() * SERVICES.length)];
-      attempts++;
-    } while (service.id === this.lastServiceId && attempts < 5);
-    this.lastServiceId = service.id;
-    return service;
-  }
-
-  materialForService(service) {
-    const color = CATEGORIES[service.category].color;
-    return new THREE.MeshStandardMaterial({
-      color,
-      emissive: color,
+    this.coinMat = new THREE.MeshStandardMaterial({
+      color: COIN_COLOR,
+      emissive: COIN_COLOR,
       emissiveIntensity: 0.4,
       metalness: 0.6,
       roughness: 0.3,
     });
+
+    this.loadModel();
   }
 
   async loadModel() {
@@ -62,16 +48,15 @@ export class CoinManager {
     } catch (e) { /* use placeholder */ }
   }
 
-  createCoinMesh(service) {
-    const mat = this.materialForService(service);
+  createCoinMesh() {
     let mesh;
     if (this.coinModel) {
       mesh = this.coinModel.clone();
       mesh.traverse((child) => {
-        if (child.isMesh) child.material = mat;
+        if (child.isMesh) child.material = this.coinMat;
       });
     } else {
-      mesh = new THREE.Mesh(this.coinGeo, mat);
+      mesh = new THREE.Mesh(this.coinGeo, this.coinMat);
       mesh.rotation.y = Math.PI / 2;
       mesh.castShadow = true;
     }
@@ -113,8 +98,8 @@ export class CoinManager {
       // Single lane line of coins
       this.spawnSingleLine();
     } else if (pattern < 0.75) {
-      // Two lanes — player picks one path (choice pattern)
-      this.spawnChoicePattern();
+      // Two lanes — player picks one path
+      this.spawnTwoLanes();
     } else {
       // Coins under an overhead obstacle (reward for sliding)
       this.spawnSlideReward();
@@ -129,7 +114,6 @@ export class CoinManager {
     } while (lane === this.lastSpawnLane && Math.random() > 0.3);
     this.lastSpawnLane = lane;
 
-    const service = this.pickService();
     const numCoins = 3 + Math.floor(Math.random() * 3); // 3-5 coins
     const startZ = SPAWN_DISTANCE;
 
@@ -142,35 +126,33 @@ export class CoinManager {
     }
 
     for (let i = 0; i < numCoins; i++) {
-      const mesh = this.createCoinMesh(service);
+      const mesh = this.createCoinMesh();
       mesh.position.set(LANES[lane], COIN_HEIGHT_NORMAL, startZ + i * COIN_SPACING);
       this.scene.add(mesh);
-      this.coins.push({ mesh, collected: false, service });
+      this.coins.push({ mesh, collected: false });
     }
   }
 
-  spawnChoicePattern() {
-    // Two lanes get coins of DIFFERENT services — player has to pick which one to learn
+  spawnTwoLanes() {
+    // Two lanes get short coin lines — player picks one path
     const lanes = [0, 1, 2];
     const shuffled = lanes.sort(() => Math.random() - 0.5);
     const lane1 = shuffled[0];
     const lane2 = shuffled[1];
 
-    const serviceA = this.pickService();
-    const serviceB = this.pickService();
     const numCoins = 3;
     const startZ = SPAWN_DISTANCE;
 
-    for (const [lane, service] of [[lane1, serviceA], [lane2, serviceB]]) {
+    for (const lane of [lane1, lane2]) {
       // Skip if obstacle blocks this lane
       const obs = this.getObstacleAt(lane, startZ, startZ + numCoins * COIN_SPACING);
       if (obs && obs.type !== 'overhead') continue;
 
       for (let i = 0; i < numCoins; i++) {
-        const mesh = this.createCoinMesh(service);
+        const mesh = this.createCoinMesh();
         mesh.position.set(LANES[lane], COIN_HEIGHT_NORMAL, startZ + i * COIN_SPACING);
         this.scene.add(mesh);
-        this.coins.push({ mesh, collected: false, service });
+        this.coins.push({ mesh, collected: false });
       }
     }
 
@@ -180,7 +162,6 @@ export class CoinManager {
   spawnSlideReward() {
     // Find an overhead obstacle ahead and place low coins under it
     let foundOverhead = false;
-    const service = this.pickService();
 
     for (const obs of this.obstacleManager.obstacles) {
       if (obs.type === 'overhead' && obs.mesh.position.z > 30) {
@@ -190,10 +171,10 @@ export class CoinManager {
         // Place coins at slide height under the obstacle
         const numCoins = 3;
         for (let i = 0; i < numCoins; i++) {
-          const mesh = this.createCoinMesh(service);
+          const mesh = this.createCoinMesh();
           mesh.position.set(LANES[lane], COIN_HEIGHT_SLIDE, obsZ - 2 + i * COIN_SPACING);
           this.scene.add(mesh);
-          this.coins.push({ mesh, collected: false, service });
+          this.coins.push({ mesh, collected: false });
         }
 
         foundOverhead = true;
@@ -213,7 +194,6 @@ export class CoinManager {
     if (coin && !coin.collected) {
       coin.collected = true;
       this.scene.remove(coin.mesh);
-      if (this.onCollect) this.onCollect(coin.service);
     }
   }
 
@@ -224,10 +204,7 @@ export class CoinManager {
     this.coins = [];
     this.lastSpawnScore = 0;
     this.lastSpawnLane = -1;
-    this.lastServiceId = null;
   }
-
-
 
   update(speed, score, allowSpawn = true) {
     if (allowSpawn && score - this.lastSpawnScore > this.spawnInterval) {

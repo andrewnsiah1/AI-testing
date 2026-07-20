@@ -154,8 +154,13 @@ export class ObstacleManager {
     const tooCloseToLastOverhead =
       this.lastOverheadZ !== null && Math.abs(z - this.lastOverheadZ) < MIN_OVERHEAD_GAP;
 
+    // Difficulty ramp: as score increases, 2-lane blocks and trains become
+    // more common so the road gets progressively harder to navigate.
+    const twoLaneChance = Math.min(0.45, 0.15 + score * 0.0004);
+    const trainChance = Math.min(0.5, 0.35 + score * 0.0002);
+
     // Decide how many lanes to block
-    const numLanes = Math.random() < 0.15 ? 2 : 1;
+    const numLanes = Math.random() < twoLaneChance ? 2 : 1;
 
     if (numLanes === 1) {
       // Single obstacle — any lane, any type
@@ -163,14 +168,14 @@ export class ObstacleManager {
       let type = Math.random();
 
       // Avoid overhead type if too close to the previous overhead obstacle
-      if (type >= 0.4 && type < 0.55 && tooCloseToLastOverhead) {
-        type = 0.2; // force barrier instead
+      if (type >= (1 - trainChance) && type < (1 - trainChance + 0.15) && tooCloseToLastOverhead) {
+        type = 0.1; // force barrier instead
       }
 
       let obstacle;
-      if (type < 0.4) {
+      if (type < (1 - trainChance) * 0.7) {
         obstacle = this.createBarrier(lane, z);
-      } else if (type < 0.55) {
+      } else if (type < (1 - trainChance)) {
         obstacle = this.createTallObstacle(lane, z);
         this.lastOverheadZ = z;
       } else {
@@ -231,7 +236,8 @@ export class ObstacleManager {
     if (allowSpawn && score - this.lastSpawnScore > this.spawnInterval) {
       this.spawn(score);
       this.lastSpawnScore = score;
-      this.spawnInterval = Math.max(15, 30 - score * 0.02);
+      // Spawn interval shrinks as score rises: starts at 30, floors at 10
+      this.spawnInterval = Math.max(10, 30 - score * 0.025);
     }
 
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
@@ -274,6 +280,12 @@ export class ObstacleManager {
     }
   }
 
+  // Returns { box, type, obstacle } for each obstacle — `type` lets callers
+  // tell a train (instant game over, matches the "unless it runs into a
+  // train" rule) apart from a barrier/overhead obstacle (a jump/slide miss,
+  // which only costs a stumble/strike rather than ending the run outright).
+  // `obstacle` is the underlying entry in `this.obstacles`, so a caller that
+  // triggers a stumble can remove that exact one via `remove()` below.
   getColliders() {
     const colliders = [];
 
@@ -286,14 +298,27 @@ export class ObstacleManager {
       box.max.z -= 0.1;
 
       // For overhead obstacles, only collide with the upper portion
-      // so the player can slide underneath
+      // so the player can slide underneath — generous gap so an early slide
+      // still clears it without feeling unfair.
       if (obs.type === 'overhead') {
-        box.min.y = 1.0; // Only the bar area and above — below 1.0 is safe to slide through
+        box.min.y = 1.3;
       }
 
-      colliders.push(box);
+      colliders.push({ box, type: obs.type, obstacle: obs });
     }
 
     return colliders;
+  }
+
+  // Removes one specific obstacle (by reference, as returned in
+  // getColliders()'s `obstacle` field). Used right after a jump/slide
+  // obstacle triggers a stumble, so the same obstacle can't immediately
+  // retrigger a collision on the next frame.
+  remove(obstacle) {
+    const index = this.obstacles.indexOf(obstacle);
+    if (index !== -1) {
+      this.scene.remove(obstacle.mesh);
+      this.obstacles.splice(index, 1);
+    }
   }
 }

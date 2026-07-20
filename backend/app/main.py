@@ -12,8 +12,10 @@ from .models import (
     LaneQuizResponse,
     AskQuestionRequest,
     AskQuestionResponse,
+    OrbNoteRequest,
+    OrbNoteResponse,
 )
-from .ai import generate_quiz_question, generate_lane_quiz, ask_about_service
+from .ai import generate_quiz_question, generate_lane_quiz, ask_about_service, generate_orb_note
 from .rate_limit import rate_limiter
 
 app = FastAPI(
@@ -84,6 +86,9 @@ async def lane_quiz(request: LaneQuizRequest, raw_request: Request):
             service_name=request.service_name,
             category=request.category,
             difficulty=request.difficulty,
+            has_notes=request.has_notes,
+            target_notes=request.target_notes,
+            unlocked_notes=request.unlocked_notes,
         )
     except Exception as e:
         print(f"Lane quiz generation failed for {request.service_id}: {e}")
@@ -95,6 +100,28 @@ async def lane_quiz(request: LaneQuizRequest, raw_request: Request):
         correct_index=quiz_data["correct_index"],
         fact=quiz_data["fact"],
     )
+
+
+@app.post("/orb-note", response_model=OrbNoteResponse)
+async def orb_note(request: OrbNoteRequest, raw_request: Request):
+    """
+    Generate the next incremental teaching note unlocked by collecting a
+    service's notes orb. Builds on `prior_notes` (everything already taught
+    about this service this run) rather than repeating it - starts from zero
+    on the first collection. This note (combined with prior ones) becomes
+    the ONLY material later lane-quiz questions about this service may test.
+    Falls back to a 502 if generation fails - the frontend should catch this
+    and use its static incremental note bank.
+    """
+    rate_limiter.check(raw_request)
+
+    try:
+        note = await generate_orb_note(request)
+    except Exception as e:
+        print(f"Orb-note generation failed for {request.service_id}: {e}")
+        raise HTTPException(status_code=502, detail="Orb-note generation failed")
+
+    return OrbNoteResponse(note=note)
 
 
 @app.post("/ask", response_model=AskQuestionResponse)

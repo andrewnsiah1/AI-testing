@@ -3,10 +3,19 @@ import { Player } from './player.js';
 import { World } from './world.js';
 import { ObstacleManager } from './obstacles.js';
 import { CoinManager } from './coins.js';
+import { OrbManager } from './orbs.js';
+import { Cop } from './cop.js';
 import { RunSession } from './session.js';
-import { CATEGORIES, getServiceById, getRandomService } from './services.js';
-import { fetchLaneQuiz, askAboutService } from './quizApi.js';
-import { getDifficultyForScore } from './difficulty.js';
+import {
+  CATEGORIES,
+  SERVICES,
+  CATEGORY_QUIZZES,
+  getServiceById,
+  getRandomService,
+  getStaticNoteFallback,
+} from './services.js';
+import { fetchLaneQuiz, fetchOrbNote, askAboutService } from './quizApi.js';
+import { getDifficultyForScore, getDifficultyForServiceLevel } from './difficulty.js';
 import { QuizGateManager } from './quizGates.js';
 
 // Game state
@@ -60,15 +69,16 @@ const session = new RunSession();
 const player = new Player(scene);
 const world = new World(scene);
 const obstacleManager = new ObstacleManager(scene);
-const coinManager = new CoinManager(scene, obstacleManager, (service) => {
-  session.recordCollection(service.id);
-});
+const coinManager = new CoinManager(scene, obstacleManager);
+const orbManager = new OrbManager(scene, obstacleManager);
 const quizGateManager = new QuizGateManager(scene);
+const cop = new Cop(scene);
 
 // In-run lane-quiz state
 const LANE_QUIZ_MIN_INTERVAL_SCORE = 120; // min score gap between lane quizzes
 const LANE_QUIZ_MAX_INTERVAL_SCORE = 220; // max score gap between lane quizzes
 const LANE_QUIZ_CLEAR_DISTANCE = 25; // road ahead of the player must be free of obstacles this far
+const ORB_LEAD_SCORE = 70; // how much earlier (in score) the notes orb spawns before its quiz, giving the player time to grab it
 // 'idle' | 'loading' | 'waitingForGap' | 'active' | 'resolving' | 'resolving-answer'
 let laneQuizState = 'idle';
 let nextLaneQuizAt = LANE_QUIZ_MIN_INTERVAL_SCORE + Math.random() * (LANE_QUIZ_MAX_INTERVAL_SCORE - LANE_QUIZ_MIN_INTERVAL_SCORE);
@@ -76,10 +86,49 @@ let currentLaneQuiz = null; // { question, choices, correctIndex, fact, service 
 let pendingLaneQuiz = null; // quiz data fetched and ready, waiting for a natural gap in traffic
 let selectedLaneIndex = 1; // starts centered
 
+// The service the *next* (or current pending) lane quiz will be about. Chosen
+// up front so the notes orb tied to it can spawn well ahead of the quiz —
+// collecting the orb unlocks notes for that exact service, but the question
+// gets asked either way.
+let pendingOrbService = null;
+let orbSpawnedForCycle = false;
+let nextOrbSpawnAt = 0;
+
+// Tracks the last quiz's question text and service ID so we never show the
+// exact same question (or even the same service) back-to-back.
+let lastQuizQuestion = '';
+let lastQuizServiceId = '';
+
+// Strike/lives system: hitting a jump/slide obstacle (barrier/overhead) OR
+// answering a lane quiz wrong is a "strike" — the first one just triggers
+// the stumble/shock animation and play continues (and the cop starts
+// chasing). Any SECOND strike, of either kind, in either order, ends the
+// run — a second jump/slide graze plays the fall-back death animation
+// instead of the regular stumble. Running into a train always ends the run
+// immediately regardless of strikes.
+let strikeCount = 0; // 0 = no strikes yet, 1 = next failure of any kind ends the run
+let stumbleActive = false; // true while the obstacle-stumble/death animation freezes gameplay
+// Consecutive CORRECT lane-quiz answers while the cop is chasing. Reaching 2
+// in a row calls off the chase: strikes reset to 0 and the cop fades out.
+// Any wrong answer resets this back to 0.
+let consecutiveCorrectAnswers = 0;
+
+// Prefetch for the orb's note: kicked off the instant the orb spawns (well
+// before the player can reach it) so the toast can show the finished note
+// immediately on pickup instead of a loading state. Keyed to the service it
+// was fetched for so a stale result never gets applied to the wrong pickup.
+// `pendingOrbNoteResult` is filled in once the fetch actually settles, so
+// collection can check synchronously whether it's already done.
+let pendingOrbNotePromise = null;
+let pendingOrbNoteServiceId = null;
+let pendingOrbNoteResult = undefined; // undefined = not settled yet, null = settled with no result
+
 // UI elements
 const scoreEl = document.getElementById('score');
 const coinsEl = document.getElementById('coins');
+const strikeIndicatorEl = document.getElementById('strike-indicator');
 const gameOverEl = document.getElementById('game-over');
+const gameOverReasonEl = document.getElementById('game-over-reason');
 const startScreenEl = document.getElementById('start-screen');
 const finalScoreEl = document.getElementById('final-score');
 const finalCoinsEl = document.getElementById('final-coins');
@@ -96,13 +145,107 @@ const summaryServicesEl = document.getElementById('summary-services');
 
 const laneQuizLoadingEl = document.getElementById('lane-quiz-loading');
 const laneQuizPopupEl = document.getElementById('lane-quiz-popup');
-const laneQuizCategoryEl = document.getElementById('lane-quiz-category');
 const laneQuizQuestionEl = document.getElementById('lane-quiz-question');
 const laneQuizChoicesEl = document.getElementById('lane-quiz-choices');
 const laneQuizResultEl = document.getElementById('lane-quiz-result');
 const laneQuizResultTitleEl = document.getElementById('lane-quiz-result-title');
 const laneQuizResultFactEl = document.getElementById('lane-quiz-result-fact');
 const laneQuizResultHintEl = document.getElementById('lane-quiz-result-hint');
+
+const orbToastEl = document.getElementById('orb-toast');
+const orbToastNameEl = document.getElementById('orb-toast-name');
+const orbToastFactEl = document.getElementById('orb-toast-fact');
+let orbToastTimer = null;
+
+const laneQuizNotesToggleEl = document.getElementById('lane-quiz-notes-toggle');
+const laneQuizNotesPanelEl = document.getElementById('lane-quiz-notes-panel');
+const laneQuizNotesSectionsEl = document.getElementById('lane-quiz-notes-sections');
+const laneQuizNoNotesEl = document.getElementById('lane-quiz-no-notes');
+
+// Shows the toast for a service whose notes orb was just collected — the
+// "micro-lesson" moment during gameplay. `noteText` is the ONE new
+// incremental note just unlocked (not the static fact/overview), or a
+// loading placeholder while it's still being generated.
+function showOrbToast(service, noteText, isLoading) {
+  if (orbToastTimer) clearTimeout(orbToastTimer);
+
+  const colorHex = `#${CATEGORIES[service.category].color.toString(16).padStart(6, '0')}`;
+  orbToastEl.style.borderColor = colorHex;
+  orbToastNameEl.textContent = `${service.name} — new note`;
+  orbToastNameEl.style.color = colorHex;
+  orbToastFactEl.textContent = noteText;
+  orbToastFactEl.style.fontStyle = isLoading ? 'italic' : 'normal';
+  orbToastFactEl.style.opacity = isLoading ? '0.7' : '0.9';
+  orbToastEl.classList.add('visible');
+
+  if (!isLoading) {
+    orbToastTimer = setTimeout(() => {
+      orbToastEl.classList.remove('visible');
+    }, 5000);
+  }
+}
+
+// Appends one service's unlocked incremental notes (in the order they were
+// taught) as a list under `container`, prefixed with a heading naming the
+// service. Used both for the quizzed service and for other previously
+// unlocked services shown alongside it.
+function appendServiceNoteList(container, service, notes, heading) {
+  if (notes.length === 0) return;
+
+  const headingEl = document.createElement('div');
+  headingEl.className = 'lesson-detail-label';
+  headingEl.style.marginTop = '10px';
+  headingEl.textContent = heading;
+  container.appendChild(headingEl);
+
+  const list = document.createElement('ul');
+  list.className = 'lesson-detail-text';
+  list.style.paddingLeft = '18px';
+  list.style.margin = '4px 0 0';
+  for (const note of notes) {
+    const item = document.createElement('li');
+    item.textContent = note;
+    item.style.marginBottom = '4px';
+    list.appendChild(item);
+  }
+  container.appendChild(list);
+}
+
+// Renders the notes panel shown while a lane quiz is active. Only the
+// incremental notes actually unlocked this run are shown (never the fuller
+// static overview/analogy/practical-use content, which is reserved for the
+// end-of-run recap). The quizzed service's notes only show if its orb was
+// collected THIS run — that's the incentive to grab it. Other services
+// already unlocked this run are also listed, since the question is allowed
+// to build off/compare against those too.
+function renderLaneQuizNotes(service) {
+  laneQuizNotesSectionsEl.innerHTML = '';
+  const targetNotes = session.getNotes(service.id);
+  const hasNotes = targetNotes.length > 0;
+
+  laneQuizNoNotesEl.style.display = hasNotes ? 'none' : 'block';
+
+  if (hasNotes) {
+    appendServiceNoteList(laneQuizNotesSectionsEl, service, targetNotes, service.name);
+  }
+
+  const otherUnlocked = session
+    .getUnlockedServiceIds()
+    .filter((id) => id !== service.id)
+    .map((id) => getServiceById(id))
+    .filter(Boolean);
+
+  for (const other of otherUnlocked) {
+    appendServiceNoteList(
+      laneQuizNotesSectionsEl,
+      other,
+      session.getNotes(other.id),
+      `Also unlocked: ${other.name}`
+    );
+  }
+
+  laneQuizNotesSectionsEl.style.display = hasNotes || otherUnlocked.length > 0 ? 'block' : 'none';
+}
 
 function renderServiceChips(container, serviceIds) {
   container.innerHTML = '';
@@ -257,7 +400,7 @@ function buildLessonCard(service) {
 // just the facts before the quiz tests retention.
 // Calls onDone() when the player continues past the lesson.
 function showLesson(onDone) {
-  const uniqueIds = session.getUniqueServiceIds();
+  const uniqueIds = session.getUniqueQuizzedServiceIds();
   if (uniqueIds.length === 0) {
     onDone();
     return;
@@ -279,9 +422,58 @@ function showLesson(onDone) {
 }
 
 function showSummary() {
-  const uniqueIds = session.getUniqueServiceIds();
-  summaryStatsEl.textContent = `Score: ${Math.floor(score)} · Coins: ${coins} · Unique services discovered: ${uniqueIds.length}`;
-  renderServiceChips(summaryServicesEl, uniqueIds);
+  const quizzedIds = session.getUniqueQuizzedServiceIds();
+  const unlockedCount = session.getUnlockedServiceIds().length;
+  summaryStatsEl.textContent = `Score: ${Math.floor(score)} · Coins: ${coins} · Services quizzed: ${quizzedIds.length} · Notes unlocked: ${unlockedCount}`;
+  renderServiceChips(summaryServicesEl, quizzedIds);
+
+  // Render quiz review list
+  const quizReviewEl = document.getElementById('quiz-review');
+  quizReviewEl.innerHTML = '';
+  const results = session.getQuizResults();
+
+  if (results.length === 0) {
+    quizReviewEl.innerHTML = '<p style="opacity:0.6; font-size:14px;">No quizzes this run.</p>';
+  } else {
+    for (const result of results) {
+      const item = document.createElement('div');
+      item.className = `quiz-review-item ${result.correct ? 'correct' : 'incorrect'}`;
+
+      const header = document.createElement('div');
+      header.className = 'quiz-review-header';
+
+      const dot = document.createElement('span');
+      dot.className = 'quiz-review-dot';
+      dot.textContent = result.correct ? '✓' : '✗';
+
+      const question = document.createElement('span');
+      question.className = 'quiz-review-question';
+      question.textContent = result.question;
+
+      const toggle = document.createElement('span');
+      toggle.className = 'quiz-review-toggle';
+      toggle.textContent = '▾';
+
+      header.appendChild(dot);
+      header.appendChild(question);
+      header.appendChild(toggle);
+
+      const explanation = document.createElement('div');
+      explanation.className = 'quiz-review-explanation';
+      explanation.textContent = result.fact;
+
+      header.addEventListener('click', () => {
+        const isOpen = explanation.classList.contains('open');
+        explanation.classList.toggle('open', !isOpen);
+        toggle.textContent = isOpen ? '▾' : '▴';
+      });
+
+      item.appendChild(header);
+      item.appendChild(explanation);
+      quizReviewEl.appendChild(item);
+    }
+  }
+
   summaryScreenEl.style.display = 'flex';
 }
 
@@ -292,6 +484,18 @@ function scheduleNextLaneQuiz(currentScore) {
     currentScore +
     LANE_QUIZ_MIN_INTERVAL_SCORE +
     Math.random() * (LANE_QUIZ_MAX_INTERVAL_SCORE - LANE_QUIZ_MIN_INTERVAL_SCORE);
+
+  // Pick which service the next quiz will cover right away (rather than at
+  // trigger time) so its notes orb can spawn with a head start, well before
+  // the question itself appears.
+  pendingOrbService = SERVICES[Math.floor(Math.random() * SERVICES.length)];
+  orbSpawnedForCycle = false;
+  nextOrbSpawnAt = Math.max(0, nextLaneQuizAt - ORB_LEAD_SCORE);
+
+  // Start fetching the orb's teaching note immediately — well before the
+  // orb even appears on screen — so by the time the player collects it the
+  // note is already resolved and the toast never shows a loading state.
+  prefetchOrbNote(pendingOrbService);
 }
 
 function renderLaneQuizChoices() {
@@ -311,10 +515,10 @@ function renderLaneQuizChoices() {
 }
 
 function showLaneQuizPopup() {
-  const service = currentLaneQuiz.service;
-  const colorHex = `#${CATEGORIES[service.category].color.toString(16).padStart(6, '0')}`;
-  laneQuizCategoryEl.textContent = `${service.name} · ${CATEGORIES[service.category].label}`;
-  laneQuizCategoryEl.style.color = colorHex;
+  // Deliberately doesn't reveal which service/category the question is
+  // about — the player has to actually read the notes/question rather than
+  // pattern-matching on a label, and it keeps which orb the quiz will draw
+  // on unpredictable.
   laneQuizQuestionEl.textContent = currentLaneQuiz.question;
   renderLaneQuizChoices();
   laneQuizPopupEl.style.display = 'block';
@@ -327,15 +531,58 @@ function showLaneQuizPopup() {
 async function triggerLaneQuiz(currentScore) {
   laneQuizState = 'loading';
 
-  const collected = session.getUniqueServiceIds();
-  const service =
-    collected.length > 0
-      ? getServiceById(collected[Math.floor(Math.random() * collected.length)])
-      : getRandomService();
+  // Which service the quiz asks about is NOT locked to the orb that just
+  // spawned — that would make it predictable ("the last orb is always the
+  // quiz"). Instead it's picked randomly from the freshest orb's service
+  // PLUS every service the player has unlocked notes for earlier in the
+  // run, so old orbs stay just as relevant as the newest one and the
+  // player can't tell in advance which pickup will actually get quizzed.
+  const freshOrbService = pendingOrbService || getRandomService();
+  const historyServiceIds = session.getUnlockedServiceIds().filter((id) => id !== freshOrbService.id);
+  const candidates = [freshOrbService, ...historyServiceIds.map((id) => getServiceById(id)).filter(Boolean)];
 
-  const difficulty = getDifficultyForScore(currentScore);
-  const dynamic = await fetchLaneQuiz(service, difficulty);
-  const quiz = dynamic || service.laneQuiz;
+  // Avoid picking the same service as the previous quiz when possible (the
+  // question itself is almost always different since it's AI-generated, but
+  // same-service-back-to-back still feels repetitive). If there's only one
+  // candidate we have no choice — but with 2+ we can always pick something
+  // different.
+  let service;
+  if (candidates.length > 1) {
+    const filtered = candidates.filter((s) => s.id !== lastQuizServiceId);
+    service = filtered.length > 0
+      ? filtered[Math.floor(Math.random() * filtered.length)]
+      : candidates[Math.floor(Math.random() * candidates.length)];
+  } else {
+    service = candidates[0];
+  }
+
+  orbManager.clear(); // no longer relevant once the quiz itself is loading
+  // If the player never reached the orb, its prefetched note (if any) is
+  // wasted work but harmless — clear the bookkeeping so it can't leak into
+  // a future, unrelated collection.
+  pendingOrbNotePromise = null;
+  pendingOrbNoteServiceId = null;
+  pendingOrbNoteResult = undefined;
+
+  // The incremental notes the player actually unlocked for this exact
+  // service this run — this is what determines how deep the question is
+  // allowed to go, and it's the ONLY content it may draw on for this
+  // service. Other previously-unlocked services can be referenced
+  // (comparisons) but never exceeded either.
+  const targetNotes = session.getNotes(service.id);
+  const hasNotes = targetNotes.length > 0;
+  const otherUnlocked = session
+    .getUnlockedServiceIds()
+    .filter((id) => id !== service.id)
+    .map((id) => ({ service: getServiceById(id), notes: session.getNotes(id) }))
+    .filter((o) => o.service);
+
+  const difficulty = getDifficultyForServiceLevel(session.getServiceDifficulty(service.id));
+  const dynamic = await fetchLaneQuiz(service, difficulty, targetNotes, otherUnlocked);
+  // Static fallback must respect the same rule: only ask a service-specific
+  // question if the player actually unlocked notes for it this run.
+  const staticFallback = hasNotes ? service.laneQuiz : CATEGORY_QUIZZES[service.category];
+  const quiz = dynamic || staticFallback;
 
   if (!quiz || gameState !== 'playing') {
     laneQuizState = 'idle';
@@ -343,6 +590,24 @@ async function triggerLaneQuiz(currentScore) {
     return;
   }
 
+  // Ensure quiz always has a `fact` field (static fallbacks may not have
+  // one) — use the service's one-liner as a reasonable fallback.
+  if (!quiz.fact) {
+    quiz.fact = service.fact || 'No explanation available.';
+  }
+
+  // Never show the exact same question text back-to-back (can happen when
+  // the backend is down and the static fallback is the only option for a
+  // given service). If it would repeat, skip this quiz cycle entirely —
+  // the next one will pick a different service.
+  if (quiz.question === lastQuizQuestion) {
+    laneQuizState = 'idle';
+    scheduleNextLaneQuiz(currentScore);
+    return;
+  }
+
+  lastQuizQuestion = quiz.question;
+  lastQuizServiceId = service.id;
   pendingLaneQuiz = { ...quiz, service };
   laneQuizState = 'waitingForGap';
 }
@@ -363,6 +628,11 @@ function tryPresentPendingLaneQuiz() {
   pendingLaneQuiz = null;
   selectedLaneIndex = player.currentLane;
   laneQuizState = 'active';
+
+  session.recordQuizzed(currentLaneQuiz.service.id);
+  renderLaneQuizNotes(currentLaneQuiz.service);
+  laneQuizNotesPanelEl.classList.remove('open');
+  laneQuizNotesToggleEl.textContent = 'View notes ▾';
 
   quizGateManager.spawnGates(currentLaneQuiz.correctIndex);
   showLaneQuizPopup();
@@ -397,13 +667,18 @@ function finishLaneQuiz() {
 function handleLaneQuizResolution(evt) {
   if (evt.isCorrect) {
     score += 50;
+    session.recordQuizResult(currentLaneQuiz.question, true, currentLaneQuiz.fact, currentLaneQuiz.service.name, currentLaneQuiz.service.id);
+    registerCorrectAnswerForChase();
     showLaneQuizResult(true, currentLaneQuiz.fact);
-    // Wait for the player to press Enter before resuming (see keydown handler)
     laneQuizState = 'awaitingContinue';
   } else {
-    // Play the shock animation first, then show the result and wait for Enter
+    session.recordQuizResult(currentLaneQuiz.question, false, currentLaneQuiz.fact, currentLaneQuiz.service.name, currentLaneQuiz.service.id);
     laneQuizState = 'resolving-answer';
     player.playShock().then(() => {
+      if (registerStrike()) {
+        gameOver('Answered wrong one too many times.');
+        return;
+      }
       showLaneQuizResult(false, currentLaneQuiz.fact);
       laneQuizState = 'awaitingContinue';
     });
@@ -416,14 +691,30 @@ setTimeout(() => {
 }, 8000);
 
 // Button handlers
-document.getElementById('start-btn').addEventListener('click', () => {
-  gameState = 'playing';
+document.getElementById('how-to-play-btn').addEventListener('click', () => {
   startScreenEl.style.display = 'none';
+  document.getElementById('rules-screen').style.display = 'flex';
+});
+
+document.getElementById('rules-start-btn').addEventListener('click', () => {
+  document.getElementById('rules-screen').style.display = 'none';
   if (loadingEl) loadingEl.style.display = 'none';
+  gameState = 'playing';
   score = 0;
   coins = 0;
   speed = 0.25;
+  strikeCount = 0;
+  stumbleActive = false;
+  consecutiveCorrectAnswers = 0;
+  cop.reset();
+  updateStrikeIndicator();
   scheduleNextLaneQuiz(0);
+});
+
+laneQuizNotesToggleEl.addEventListener('click', () => {
+  const isOpen = laneQuizNotesPanelEl.classList.contains('open');
+  laneQuizNotesPanelEl.classList.toggle('open', !isOpen);
+  laneQuizNotesToggleEl.textContent = isOpen ? 'View notes ▾' : 'Hide notes ▴';
 });
 
 continueBtn.addEventListener('click', () => {
@@ -439,10 +730,19 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   score = 0;
   coins = 0;
   speed = 0.25;
+  strikeCount = 0;
+  stumbleActive = false;
+  consecutiveCorrectAnswers = 0;
+  cop.reset();
+  updateStrikeIndicator();
   session.reset();
   player.reset();
   obstacleManager.reset();
   coinManager.reset();
+  orbManager.reset();
+  pendingOrbNotePromise = null;
+  pendingOrbNoteServiceId = null;
+  pendingOrbNoteResult = undefined;
 
   // Reset lane-quiz state
   laneQuizState = 'idle';
@@ -452,6 +752,7 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   laneQuizPopupEl.style.display = 'none';
   laneQuizLoadingEl.style.display = 'none';
   laneQuizResultEl.style.display = 'none';
+  orbToastEl.classList.remove('visible');
   scheduleNextLaneQuiz(0);
 });
 
@@ -534,10 +835,47 @@ document.addEventListener('touchend', (e) => {
   }
 });
 
-// Game over
-function gameOver() {
+// Updates the small HUD line showing whether the player is one mistake away
+// from ending the run.
+function updateStrikeIndicator() {
+  strikeIndicatorEl.textContent = strikeCount > 0 ? 'One more mistake ends the run!' : '';
+}
+
+// Records a strike (a jump/slide obstacle graze, or a wrong quiz answer).
+// The first strike is a warning — the run continues, and the cop starts
+// chasing. A second strike, of EITHER kind, in ANY order, ends the run.
+// Returns true if this strike just ended the run.
+function registerStrike() {
+  strikeCount++;
+  consecutiveCorrectAnswers = 0; // any failure resets the "answer 2 right" progress
+  if (strikeCount >= 2) {
+    return true;
+  }
+  updateStrikeIndicator();
+  cop.activate();
+  return false;
+}
+
+// Called after a CORRECT lane-quiz answer while the cop is chasing (i.e.
+// the player already has a strike). Two correct answers in a row calls off
+// the chase entirely: strikes reset to zero and the cop fades out.
+function registerCorrectAnswerForChase() {
+  if (strikeCount === 0) return; // cop isn't chasing, nothing to do
+  consecutiveCorrectAnswers++;
+  if (consecutiveCorrectAnswers >= 2) {
+    strikeCount = 0;
+    consecutiveCorrectAnswers = 0;
+    updateStrikeIndicator();
+    cop.deactivate();
+  }
+}
+
+// Game over. `reason` is a short player-facing explanation shown on the
+// game-over screen (e.g. "Hit by a train" vs "Two strikes").
+function gameOver(reason) {
   gameState = 'over';
   gameOverEl.style.display = 'block';
+  gameOverReasonEl.textContent = reason || '';
   finalScoreEl.textContent = Math.floor(score);
   finalCoinsEl.textContent = coins;
 
@@ -548,16 +886,44 @@ function gameOver() {
   laneQuizLoadingEl.style.display = 'none';
   laneQuizResultEl.style.display = 'none';
   quizGateManager.clear();
+  orbManager.clear();
 }
 
 // Collision detection
 function checkCollisions() {
   const playerBox = player.getCollider();
 
-  const obstacles = obstacleManager.getColliders();
-  for (const obstacleBox of obstacles) {
-    if (playerBox.intersectsBox(obstacleBox)) {
-      gameOver();
+  // Obstacle collisions — blocked during stumble invulnerability so the
+  // same cluster can't double-hit, but coin/orb collection still works.
+  if (!stumbleActive) {
+    const obstacles = obstacleManager.getColliders();
+    for (const { box, type, obstacle } of obstacles) {
+      if (!playerBox.intersectsBox(box)) continue;
+
+      if (type === 'train') {
+        gameState = 'dying';
+        player.playFallBackDeath().then(() => {
+          gameOver('Hit by a train.');
+        });
+        return;
+      }
+
+      obstacleManager.remove(obstacle);
+      stumbleActive = true;
+      const isFatal = strikeCount >= 1;
+
+      if (isFatal) {
+        gameState = 'dying';
+        player.playFallBackDeath().then(() => {
+          gameOver('Stumbled one too many times.');
+        });
+      } else {
+        player.playStumble().then(() => {
+          stumbleActive = false;
+          if (gameState !== 'playing') return;
+          registerStrike();
+        });
+      }
       return;
     }
   }
@@ -568,6 +934,68 @@ function checkCollisions() {
       coins++;
       coinManager.collect(coinColliders[i].index);
     }
+  }
+
+  const orbBox = orbManager.getCollider();
+  if (orbBox && playerBox.intersectsBox(orbBox)) {
+    const service = orbManager.collect();
+    if (service) {
+      collectOrbNote(service);
+    }
+  }
+}
+
+// Kicks off fetching the orb's incremental note the instant it spawns —
+// well before the player can reach it (see ORB_LEAD_SCORE) — so by the time
+// they actually collect it, the note is usually already sitting ready and
+// the toast can show finished text immediately instead of a loading state.
+function prefetchOrbNote(service) {
+  const priorNotes = session.getNotes(service.id);
+  pendingOrbNoteServiceId = service.id;
+  pendingOrbNoteResult = undefined;
+  const promise = fetchOrbNote(service, priorNotes);
+  pendingOrbNotePromise = promise;
+
+  promise.then((result) => {
+    // Only record the result if this prefetch is still the current one
+    // (e.g. hasn't been superseded by a reset/new cycle in the meantime).
+    if (pendingOrbNotePromise === promise) {
+      pendingOrbNoteResult = result;
+    }
+  });
+}
+
+// Handles collecting a service's notes orb: resolves the prefetched note
+// (which was kicked off the moment the quiz cycle was scheduled — well
+// before the orb even appeared on screen). By the time the player reaches
+// the orb, the note should always already be resolved so the toast shows
+// instantly with no loading state. Falls back to a static note if the
+// fetch failed entirely.
+async function collectOrbNote(service) {
+  const priorNotes = session.getNotes(service.id);
+  const isPrefetchedForThisService = pendingOrbNoteServiceId === service.id && pendingOrbNotePromise;
+
+  let dynamicNote;
+  if (isPrefetchedForThisService && pendingOrbNoteResult !== undefined) {
+    // Already resolved (the expected path).
+    dynamicNote = pendingOrbNoteResult;
+  } else if (isPrefetchedForThisService) {
+    // Still in flight (very unlikely given the head start) — silently await.
+    dynamicNote = await pendingOrbNotePromise;
+  } else {
+    // No prefetch at all (shouldn't happen, but handle gracefully).
+    dynamicNote = await fetchOrbNote(service, priorNotes);
+  }
+
+  pendingOrbNotePromise = null;
+  pendingOrbNoteServiceId = null;
+  pendingOrbNoteResult = undefined;
+
+  const note = dynamicNote || getStaticNoteFallback(service, priorNotes.length);
+
+  if (note) {
+    session.addNote(service.id, note);
+    showOrbToast(service, note, false);
   }
 }
 
@@ -589,6 +1017,13 @@ function animate() {
       world.update(speed);
       obstacleManager.update(speed, score);
       coinManager.update(speed, score);
+
+      if (!orbSpawnedForCycle && pendingOrbService && score >= nextOrbSpawnAt) {
+        orbManager.spawn(pendingOrbService);
+        orbSpawnedForCycle = true;
+      }
+      orbManager.update(speed);
+
       checkCollisions();
 
       if (laneQuizState === 'idle' && score >= nextLaneQuizAt) {
@@ -606,6 +1041,7 @@ function animate() {
       world.update(speed);
       obstacleManager.update(speed, score, false);
       coinManager.update(speed, score, false);
+      orbManager.update(speed);
       checkCollisions();
 
       tryPresentPendingLaneQuiz();
@@ -627,6 +1063,12 @@ function animate() {
     // fully frozen, only the player animates (running in place / shock
     // animation), and 'awaitingContinue' waits for the player to press Enter
 
+    player.update();
+    cop.update(player);
+  }
+
+  // 'dying' state: world is frozen, only the player's death animation plays
+  if (gameState === 'dying') {
     player.update();
   }
 

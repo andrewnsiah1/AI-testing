@@ -11,6 +11,50 @@ export const CATEGORIES = {
   integration: { color: 0x1abc9c, label: 'Serverless & Integration' },
 };
 
+// Fallback 3-choice questions used when the player has NOT unlocked notes
+// for the quizzed service (skipped its orb) AND the dynamic backend is
+// unreachable. These stay at the category level on purpose — they never
+// name or test a specific service, matching what a player with no notes
+// actually knows: just the color-coded category from the game.
+export const CATEGORY_QUIZZES = {
+  compute: {
+    question: 'What do "Compute" services generally provide?',
+    choices: ['Places to run your code/apps', 'Places to store files', 'DNS lookups'],
+    correctIndex: 0,
+    fact: 'Compute services give you somewhere to actually run code or applications, as opposed to just storing or routing data.',
+  },
+  storage: {
+    question: 'What do "Storage" services generally provide?',
+    choices: ['A place to run code', 'A place to keep data long-term', 'Network routing'],
+    correctIndex: 1,
+    fact: 'Storage services exist to durably hold onto data over time, separate from wherever the code that uses it runs.',
+  },
+  database: {
+    question: 'What do "Database" services generally provide?',
+    choices: ['Structured, queryable data storage', 'Video streaming', 'DNS routing'],
+    correctIndex: 0,
+    fact: 'Database services store data in a structured, queryable way, rather than as raw files.',
+  },
+  networking: {
+    question: 'What do "Networking" services generally handle?',
+    choices: ['Encrypting files at rest', 'How traffic moves and connects', 'Running containers'],
+    correctIndex: 1,
+    fact: 'Networking services control how traffic gets routed and connected between resources.',
+  },
+  security: {
+    question: 'What do "Security" services generally handle?',
+    choices: ['Access control and protecting data', 'Video rendering', 'Load balancing traffic'],
+    correctIndex: 0,
+    fact: 'Security services focus on controlling access and protecting data and resources.',
+  },
+  integration: {
+    question: 'What do "Serverless & Integration" services generally do?',
+    choices: ['Store large files', 'Connect and coordinate other services', 'Provide raw compute'],
+    correctIndex: 1,
+    fact: 'Serverless & Integration services connect and coordinate other services together, often without managing servers.',
+  },
+};
+
 export const SERVICES = [
   {
     id: 'ec2',
@@ -371,4 +415,19 @@ export function getServiceById(id) {
 
 export function getRandomService() {
   return SERVICES[Math.floor(Math.random() * SERVICES.length)];
+}
+
+// Offline-only fallback progression of incremental notes for a service,
+// used when /orb-note is unreachable. The AI-generated note (built fresh
+// each collection via fetchOrbNote) is the primary path; this just reuses
+// the static fact/overview/analogy/practicalUse fields — normally reserved
+// for the end-of-run recap — as a degraded resilience path so the game
+// still works offline. `priorCount` is how many notes have already been
+// unlocked for this service this run, so repeated collections advance
+// through the list instead of repeating the same note.
+export function getStaticNoteFallback(service, priorCount) {
+  const progression = [service.fact, service.overview, service.analogy, service.practicalUse].filter(Boolean);
+  if (progression.length === 0) return null;
+  const index = Math.min(priorCount, progression.length - 1);
+  return progression[index];
 }

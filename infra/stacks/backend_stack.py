@@ -120,6 +120,11 @@ class BackendStack(Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integration,
         )
+        http_api.add_routes(
+            path="/orb-note",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integration,
+        )
 
         # ============================================================
         # Outputs

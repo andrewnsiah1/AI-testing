@@ -7,8 +7,8 @@ const LANE_WIDTH = 3;
 const LANES = [LANE_WIDTH, 0, -LANE_WIDTH]; // left, center, right (from camera's perspective)
 const JUMP_FORCE = 0.25;
 const GRAVITY = 0.012;
-const SLIDE_DURATION = 600;
-const SLIDE_COOLDOWN = 400; // ms after slide ends before you can slide again
+const SLIDE_DURATION_FALLBACK = 600; // only used if no animation clip loaded
+const SLIDE_COOLDOWN = 200; // ms after slide ends before you can slide again
 
 export class Player {
   constructor(scene) {
@@ -47,10 +47,10 @@ export class Player {
       const idleGltf = await loader.loadAsync('/models/Idle.glb');
       const model = idleGltf.scene;
 
-      // Auto-scale to ~1.8 units tall
+      // Auto-scale to ~2.4 units tall
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
-      const targetHeight = 1.8;
+      const targetHeight = 2.4;
       const scale = targetHeight / size.y;
       model.scale.set(scale, scale, scale);
 
@@ -119,7 +119,15 @@ export class Player {
       try {
         const slideGltf = await loader.loadAsync('/models/Running%20Slide.glb');
         if (slideGltf.animations.length > 0) {
-          const slideAction = this.mixer.clipAction(slideGltf.animations[0]);
+          const clip = slideGltf.animations[0];
+          // Strip root motion (position/quaternion tracks on the root bone)
+          // so the slide animation doesn't push the character forward in
+          // world space, which would cause a teleport-back when it ends.
+          clip.tracks = clip.tracks.filter((track) => {
+            const isRoot = track.name.endsWith('.position') && !track.name.includes('/');
+            return !isRoot;
+          });
+          const slideAction = this.mixer.clipAction(clip);
           slideAction.setLoop(THREE.LoopOnce);
           slideAction.clampWhenFinished = true;
           this.animations.slide = slideAction;
@@ -141,6 +149,35 @@ export class Player {
         }
       } catch (e) {
         console.log('No electrocution animation found');
+      }
+
+      // Load stumble animation (played on hitting a jump/slide obstacle)
+      try {
+        const stumbleGltf = await loader.loadAsync('/models/Jogging%20Stumble.glb');
+        if (stumbleGltf.animations.length > 0) {
+          const stumbleAction = this.mixer.clipAction(stumbleGltf.animations[0]);
+          stumbleAction.setLoop(THREE.LoopOnce);
+          stumbleAction.clampWhenFinished = true;
+          this.animations.stumble = stumbleAction;
+          console.log('Stumble animation loaded');
+        }
+      } catch (e) {
+        console.log('No stumble animation found');
+      }
+
+      // Load fall-back death animation (played on a second stumble - the
+      // strike that actually ends the run from a jump/slide obstacle)
+      try {
+        const deathGltf = await loader.loadAsync('/models/Falling%20Back%20Death.glb');
+        if (deathGltf.animations.length > 0) {
+          const deathAction = this.mixer.clipAction(deathGltf.animations[0]);
+          deathAction.setLoop(THREE.LoopOnce);
+          deathAction.clampWhenFinished = true;
+          this.animations.fallBackDeath = deathAction;
+          console.log('Fall-back death animation loaded');
+        }
+      } catch (e) {
+        console.log('No fall-back death animation found');
       }
 
     } catch (e) {
@@ -207,7 +244,7 @@ export class Player {
   }
 
   jump() {
-    if (!this.isJumping) {
+    if (!this.isJumping && !this.isStumbling) {
       this.isJumping = true;
       this.velocityY = JUMP_FORCE;
       this.playAnimation('jump');
@@ -223,8 +260,12 @@ export class Player {
     const now = Date.now();
     if (!this.isJumping && !this.isSliding && now >= this.slideCooldownUntil) {
       this.isSliding = true;
+      // Cap slide duration at 800ms — long enough to feel responsive and
+      // clear overheads, short enough to not overstay. The animation clip
+      // may be longer but we cut it short.
+      this.slideDuration = 800;
       this.slideTimer = now;
-      this.playAnimation('slide');
+      if (!this.isStumbling) this.playAnimation('slide');
       if (!this.modelLoaded) this.mesh.scale.y = 0.4;
     }
   }
@@ -247,6 +288,42 @@ export class Player {
     });
   }
 
+  // Plays the stumble animation for grazing a jump/slide obstacle (the
+  // player's first "strike" instead of an instant game over). Resolves once
+  // the clip finishes (or after a fallback delay if no clip loaded).
+  playStumble() {
+    return new Promise((resolve) => {
+      this.isStumbling = true;
+      this.playAnimation('stumble');
+
+      const action = this.animations.stumble;
+      const durationMs = action ? action.getClip().duration * 1000 : 1000;
+
+      setTimeout(() => {
+        this.isStumbling = false;
+        this.playAnimation('run');
+        resolve();
+      }, durationMs);
+    });
+  }
+
+  // Plays the fall-back death animation for a SECOND jump/slide obstacle
+  // graze — the strike that actually ends the run (as opposed to the first
+  // stumble, which just clips and continues). Does not resolve back to
+  // 'run' since the run is over; caller shows the game-over screen once
+  // this resolves.
+  playFallBackDeath() {
+    return new Promise((resolve) => {
+      this.isStumbling = true;
+      this.playAnimation('fallBackDeath');
+
+      const action = this.animations.fallBackDeath;
+      const durationMs = action ? action.getClip().duration * 1000 : 1400;
+
+      setTimeout(resolve, durationMs);
+    });
+  }
+
   reset() {
     this.currentLane = 1;
     this.targetX = 0;
@@ -255,6 +332,8 @@ export class Player {
     this.velocityY = 0;
     this.isJumping = false;
     this.isSliding = false;
+    this.isShocked = false;
+    this.isStumbling = false;
     this.slideCooldownUntil = 0;
     this.playAnimation('run');
   }
@@ -280,7 +359,7 @@ export class Player {
 
     // Slide
     if (this.isSliding) {
-      if (Date.now() - this.slideTimer > SLIDE_DURATION) {
+      if (Date.now() - this.slideTimer > (this.slideDuration || SLIDE_DURATION_FALLBACK)) {
         this.isSliding = false;
         this.slideCooldownUntil = Date.now() + SLIDE_COOLDOWN;
         if (!this.modelLoaded) this.mesh.scale.y = 1;
@@ -295,8 +374,8 @@ export class Player {
   }
 
   getCollider() {
-    const height = this.isSliding ? 0.8 : 1.8;
-    const yCenter = this.mesh.position.y + (this.isSliding ? 0.4 : 0.9);
+    const height = this.isSliding ? 0.7 : 2.4;
+    const yCenter = this.mesh.position.y + (this.isSliding ? 0.35 : 1.2);
 
     this.collider.setFromCenterAndSize(
       new THREE.Vector3(this.mesh.position.x, yCenter, this.mesh.position.z),

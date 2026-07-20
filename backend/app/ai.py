@@ -13,7 +13,7 @@ from typing import Optional
 
 import boto3
 
-from .models import Source
+from .models import Source, ServiceNotes, OrbNoteRequest
 
 # Bedrock clients - initialized once per Lambda cold start
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -170,22 +170,153 @@ async def generate_quiz_question(
     return quiz_data
 
 
-LANE_QUIZ_PROMPT = """You are a quiz question generator for "Cloud Runner", an educational endless-runner game that teaches real AWS concepts. Use a neutral, clear, straightforward tone - no persona, no roleplay, no flavor text.
+def _format_notes(notes: ServiceNotes) -> str:
+    """Renders one service's unlocked notes as plain text for
+    prompt-injection, exactly matching what the player has actually been
+    taught in-game so far (in the order they were taught).
+    """
+    lines = [f"Service: {notes.service_name} (category: {notes.category})"]
+    for i, note in enumerate(notes.notes, start=1):
+        lines.append(f"Note {i}: {note}")
+    return "\n".join(lines)
+
+
+# Generates ONE new incremental teaching note when the player collects a
+# service's notes orb. The note must build on whatever was already taught
+# (prior_notes) without repeating it, starting from zero on first collection.
+# Grounded by the Knowledge Base when available so the teaching content
+# itself stays accurate - this is the ONE place in the notes pipeline that's
+# allowed to pull in outside AWS knowledge, since it's the source that
+# defines what the player has been taught, not a quiz testing beyond it.
+ORB_NOTE_PROMPT = """You are writing a single short teaching note for "Cloud Runner", an educational endless-runner game that teaches real AWS concepts incrementally, one small idea at a time. Use a neutral, clear, straightforward tone - no persona, no roleplay, no flavor text.
+
+The player just collected a "notes orb" for the AWS service "{service_name}" (category: {category}). This is one entry in a growing personal notebook the player builds up over the course of a run by collecting orbs for the same service repeatedly.
+
+{prior_notes_block}
+
+Write the NEXT note in this sequence. Rules:
+1. If there are no prior notes, this is the player's introduction to {service_name} from zero - assume they know nothing about it yet. Teach the single most fundamental, "what is it" idea.
+2. If there are prior notes, this note MUST build on top of them - teach one NEW idea that goes slightly deeper (a specific capability, a common use case, how it compares to something already taught, a key limitation, etc.). Do NOT repeat anything already covered in the prior notes.
+3. Keep it to 1-2 short sentences - it will be shown as a brief in-game popup.
+4. Be technically accurate. Do not invent capabilities.
+5. This note (combined with all prior notes) will later be the ONLY material a quiz question about {service_name} is allowed to test - so make sure it is a complete, self-contained, unambiguous statement on its own, not a fragment that only makes sense with outside context.
+6. No fantasy metaphors, no wizard language - plain technical English only.
+
+Respond with ONLY the note text itself, no quotes, no JSON, no preamble.
+"""
+
+
+async def generate_orb_note(request: OrbNoteRequest) -> str:
+    """
+    Generates the next incremental teaching note for a service's notes orb,
+    building from zero (if prior_notes is empty) or deeper than whatever the
+    player has already been taught this run. Grounded by the Knowledge Base
+    when available.
+
+    Raises on failure - caller should fall back to a static incremental note.
+    """
+    rag_context, _sources = await query_knowledge_base(
+        f"AWS {request.service_name} {request.category}"
+    )
+
+    if request.prior_notes:
+        prior_notes_block = "The player has already been taught, in order:\n" + "\n".join(
+            f"{i + 1}. {n}" for i, n in enumerate(request.prior_notes)
+        )
+    else:
+        prior_notes_block = "The player has not been taught anything about this service yet - this is their first note."
+
+    prompt = ORB_NOTE_PROMPT.format(
+        service_name=request.service_name,
+        category=request.category,
+        prior_notes_block=prior_notes_block,
+    )
+
+    if rag_context:
+        prompt += f"\n\nGround this note in this reference material from AWS documentation:\n{rag_context}\n"
+
+    body = json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 150,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+    )
+
+    response = bedrock_runtime.invoke_model(
+        modelId=MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=body,
+    )
+
+    response_body = json.loads(response["body"].read())
+    note = response_body["content"][0]["text"].strip().strip('"')
+
+    if not note:
+        raise ValueError("Empty orb-note response from model")
+
+    return note
+
+
+# Used when the player HAS collected the notes orb for the quizzed service.
+# The question must be answerable using ONLY the provided notes - no outside
+# AWS knowledge is allowed to leak in, even if it would be true. This keeps
+# the notes orb meaningfully load-bearing: skipping it costs real ability to
+# answer, and reading it is always sufficient to answer.
+LANE_QUIZ_NOTES_PROMPT = """You are a quiz question generator for "Cloud Runner", an educational endless-runner game that teaches real AWS concepts. Use a neutral, clear, straightforward tone - no persona, no roleplay, no flavor text.
 
 This question will pop up DURING gameplay. The player runs in place while reading it, then picks one of exactly 3 answer choices, each mapped to a lane (left, center, right) on the road. They then run into the lane matching their chosen answer.
 
-The player just collected an in-game item representing the AWS service "{service_name}" (category: {category}).
+The player collected notes orbs for the AWS service "{service_name}" (category: {category}), unlocking exactly these incremental teaching notes, in the order they were taught (the ONLY things the player has read about this service):
+
+--- NOTES ON {service_name} ---
+{target_notes}
+--- END NOTES ---
+
+{extra_notes_block}
 
 Difficulty tier for this question: {difficulty}
-(Beginner = high-level "what is it" questions; Intermediate = common use cases and basic behavior; Advanced = specific limits, configuration, or comparisons between similar services; Expert = edge cases, cost/performance tradeoffs, and architecture-level reasoning.)
 
-Generate ONE multiple-choice question about {service_name} AT THE SPECIFIED DIFFICULTY TIER. Rules:
+STRICT GROUNDING RULE - this is the most important rule: The question, all 3 choices, and the correct answer MUST be derivable ENTIRELY from the notes above (plus any other-service notes provided, if you use them for a comparison). Do NOT introduce any AWS fact, capability, limit, number, or comparison that is not explicitly stated or directly implied in the notes text. If the notes don't mention something (e.g. pricing, specific limits, region availability), you may NOT ask about it or use it as a wrong-answer distractor requiring outside knowledge to rule out. Higher difficulty tiers should be achieved by requiring closer reading/reasoning about the notes text itself (e.g. subtle distinctions between the overview and the analogy, or a comparison against another unlocked service's notes), NOT by pulling in facts beyond the notes.
+
+Additional rules:
 1. Exactly 3 answer choices, only one correct - this is different from a normal 4-choice quiz because there are only 3 lanes.
 2. Keep the question and choices VERY short - a sentence or less each. This appears as a popup during a fast-paced runner game and must be read in a few seconds.
-3. The question's difficulty MUST match the specified tier.
-4. Include a one-sentence "fact" shown as feedback after the player answers - this should reinforce the correct answer.
-5. Be technically accurate. Do not invent capabilities.
-6. No fantasy metaphors, no wizard language - plain technical English only.
+3. Include a one-sentence "fact" shown as feedback after the player answers - it must also come directly from the notes, reinforcing the correct answer.
+4. No fantasy metaphors, no wizard language - plain technical English only.
+5. CRITICAL - WRONG ANSWERS MUST BE CLEARLY WRONG: The 2 incorrect choices must be unambiguously, obviously wrong to someone who has read the notes. They should describe things the service clearly does NOT do or IS NOT (e.g. a storage service's wrong answers might be "runs serverless code" or "manages DNS"). NEVER make a wrong answer a partial truth, a subset of the correct answer, or something the service also does. If the correct answer is "set up, operate, and scale databases", do NOT use "set up databases" or "scale databases" as wrong answers since those are also true. The player must be able to rule out wrong answers with confidence, not feel tricked by a technicality.
+
+Respond with ONLY valid JSON in this exact shape, no other text:
+{{
+  "question": "...",
+  "choices": ["...", "...", "..."],
+  "correct_index": 0,
+  "fact": "..."
+}}
+"""
+
+# Used when the player did NOT collect the notes orb for the quizzed service.
+# The question drops to what's visible in-game without reading anything
+# service-specific: the orb's color-coded category. It must NOT test any
+# fact specific to the individual service, since the player was never shown
+# that content.
+LANE_QUIZ_NO_NOTES_PROMPT = """You are a quiz question generator for "Cloud Runner", an educational endless-runner game that teaches real AWS concepts. Use a neutral, clear, straightforward tone - no persona, no roleplay, no flavor text.
+
+This question will pop up DURING gameplay. The player runs in place while reading it, then picks one of exactly 3 answer choices, each mapped to a lane (left, center, right) on the road. They then run into the lane matching their chosen answer.
+
+The player skipped the notes orb for an AWS service in the "{category}" category this run, so they have NOT been shown any lesson content about the specific service. They only know its color-coded category from the game.
+
+{extra_notes_block}
+
+STRICT GROUNDING RULE: Since the player has no service-specific notes, the question must ONLY test general knowledge of what the "{category}" category of AWS services is for at a high level (e.g. what a "{category}" service broadly does), not any fact specific to one particular service. Do not name a specific AWS service in the question or require knowing one to answer - keep it at the category concept level. If other-service notes are provided above, you may use them as a point of comparison, but the correct answer and distractors must still only require category-level reasoning, not specific facts about the unread service.
+
+Additional rules:
+1. Exactly 3 answer choices, only one correct.
+2. Keep the question and choices VERY short - a sentence or less each.
+3. Include a one-sentence "fact" shown as feedback after the player answers, reinforcing the correct answer, staying at the category level.
+4. No fantasy metaphors, no wizard language - plain technical English only.
+5. CRITICAL - WRONG ANSWERS MUST BE CLEARLY WRONG: The 2 incorrect choices must describe things that are obviously NOT what this category of services does. They should reference a completely different category's purpose (e.g. for a "Storage" question, wrong answers might be "run serverless code" or "manage DNS routing"). NEVER make a wrong answer a partial truth or something that could arguably be correct.
 
 Respond with ONLY valid JSON in this exact shape, no other text:
 {{
@@ -198,25 +329,51 @@ Respond with ONLY valid JSON in this exact shape, no other text:
 
 
 async def generate_lane_quiz(
-    service_id: str, service_name: str, category: str, difficulty: Optional[str] = None
+    service_id: str,
+    service_name: str,
+    category: str,
+    difficulty: Optional[str] = None,
+    has_notes: bool = False,
+    target_notes: Optional[ServiceNotes] = None,
+    unlocked_notes: Optional[list[ServiceNotes]] = None,
 ) -> dict:
     """
-    Generate a 3-choice quiz question for the in-run lane-gate mechanic,
-    grounded by the Knowledge Base when available. Each choice maps to a
-    lane (left/center/right) the player runs into.
+    Generate a 3-choice quiz question for the in-run lane-gate mechanic.
+    Each choice maps to a lane (left/center/right) the player runs into.
+
+    Grounded ENTIRELY in the player's own collected notes rather than the
+    Knowledge Base - the question must never test beyond what the player has
+    actually been shown in-game:
+    - If `has_notes` and `target_notes` are provided, the question is
+      grounded strictly in that service's notes (optionally also drawing on
+      `unlocked_notes` from other services for comparisons).
+    - Otherwise, the question stays at the service's category level, since
+      the player was never shown anything more specific.
 
     Raises on failure - caller should fall back to a static 3-choice question bank.
     """
-    rag_context, _sources = await query_knowledge_base(f"AWS {service_name} {category}")
+    extra_notes_block = ""
+    if unlocked_notes:
+        other = "\n\n".join(_format_notes(n) for n in unlocked_notes)
+        extra_notes_block = (
+            "The player has ALSO previously unlocked notes on these other services this run "
+            "(you may use these for a comparison question, but still may not exceed what's written):\n"
+            f"{other}\n"
+        )
 
-    prompt = LANE_QUIZ_PROMPT.format(
-        service_name=service_name,
-        category=category,
-        difficulty=difficulty or "Beginner",
-    )
-
-    if rag_context:
-        prompt += f"\n\nGround your question and fact in this reference material from AWS documentation:\n{rag_context}\n"
+    if has_notes and target_notes:
+        prompt = LANE_QUIZ_NOTES_PROMPT.format(
+            service_name=service_name,
+            category=category,
+            target_notes=_format_notes(target_notes),
+            extra_notes_block=extra_notes_block,
+            difficulty=difficulty or "Beginner",
+        )
+    else:
+        prompt = LANE_QUIZ_NO_NOTES_PROMPT.format(
+            category=category,
+            extra_notes_block=extra_notes_block,
+        )
 
     body = json.dumps(
         {
