@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+const BASE = import.meta.env.BASE_URL;
+
 const LANE_WIDTH = 3;
 const LANES = [LANE_WIDTH, 0, -LANE_WIDTH]; // matches player.js lane positions
 const CHASE_Z = -2.2; // behind the player, between the camera and the runner
@@ -74,7 +76,7 @@ export class Cop {
 
     try {
       console.log('Loading Cop Run.glb...');
-      const runGltf = await loader.loadAsync('/models/cop/Cop%20Run.glb');
+      const runGltf = await loader.loadAsync(`${BASE}models/cop/Cop%20Run.glb`);
       const model = runGltf.scene;
 
       // Auto-scale to ~2.4 units tall, same as the player
@@ -113,7 +115,7 @@ export class Cop {
 
       // Load jump animation (mirrors the player jumping)
       try {
-        const jumpGltf = await loader.loadAsync('/models/cop/Cop%20Jump.glb');
+        const jumpGltf = await loader.loadAsync(`${BASE}models/cop/Cop%20Jump.glb`);
         if (jumpGltf.animations.length > 0) {
           const jumpAction = this.mixer.clipAction(jumpGltf.animations[0]);
           jumpAction.setLoop(THREE.LoopOnce);
@@ -127,7 +129,7 @@ export class Cop {
 
       // Load slide/roll animation (mirrors the player sliding)
       try {
-        const tackleGltf = await loader.loadAsync('/models/cop/Cop%20Tackle.glb');
+        const tackleGltf = await loader.loadAsync(`${BASE}models/cop/Cop%20Tackle.glb`);
         if (tackleGltf.animations.length > 0) {
           const slideAction = this.mixer.clipAction(tackleGltf.animations[0]);
           slideAction.setLoop(THREE.LoopOnce);

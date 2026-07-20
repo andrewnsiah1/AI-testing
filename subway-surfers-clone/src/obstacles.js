@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+const BASE = import.meta.env.BASE_URL;
+
 const LANE_WIDTH = 3;
 const LANES = [LANE_WIDTH, 0, -LANE_WIDTH];
 const SPAWN_DISTANCE = 80;
@@ -28,7 +30,7 @@ export class ObstacleManager {
 
     for (const name of trainFiles) {
       try {
-        const gltf = await loader.loadAsync(`/models/trains/${name}.glb`);
+        const gltf = await loader.loadAsync(`${BASE}models/trains/${name}.glb`);
         const model = gltf.scene;
         model.traverse((child) => {
           if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
@@ -42,7 +44,7 @@ export class ObstacleManager {
     }
 
     try {
-      const gltf = await loader.loadAsync('/models/barrier.glb');
+      const gltf = await loader.loadAsync(`${BASE}models/barrier.glb`);
       this.models.barrier = gltf.scene;
       this.models.barrier.traverse((child) => {
         if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }

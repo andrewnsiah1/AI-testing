@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+const BASE = import.meta.env.BASE_URL;
 const LANE_WIDTH = 3;
 // From the camera's POV (behind player looking at +Z):
 // Screen-left = +X, Screen-right = -X
@@ -44,7 +45,7 @@ export class Player {
 
     try {
       console.log('Loading Idle.glb...');
-      const idleGltf = await loader.loadAsync('/models/Idle.glb');
+      const idleGltf = await loader.loadAsync(`${BASE}models/Idle.glb`);
       const model = idleGltf.scene;
 
       // Auto-scale to ~2.4 units tall
@@ -87,7 +88,7 @@ export class Player {
 
       // Load jump animation
       try {
-        const jumpGltf = await loader.loadAsync('/models/Jumping.glb');
+        const jumpGltf = await loader.loadAsync(`${BASE}models/Jumping.glb`);
         if (jumpGltf.animations.length > 0) {
           const jumpAction = this.mixer.clipAction(jumpGltf.animations[0]);
           jumpAction.setLoop(THREE.LoopOnce);
@@ -101,7 +102,7 @@ export class Player {
 
       // Load running animation
       try {
-        const runGltf = await loader.loadAsync('/models/Running.glb');
+        const runGltf = await loader.loadAsync(`${BASE}models/Running.glb`);
         if (runGltf.animations.length > 0) {
           const runAction = this.mixer.clipAction(runGltf.animations[0]);
           this.animations.run = runAction;
@@ -117,7 +118,7 @@ export class Player {
 
       // Load slide animation
       try {
-        const slideGltf = await loader.loadAsync('/models/Running%20Slide.glb');
+        const slideGltf = await loader.loadAsync(`${BASE}models/Running%20Slide.glb`);
         if (slideGltf.animations.length > 0) {
           const clip = slideGltf.animations[0];
           // Strip root motion (position/quaternion tracks on the root bone)
@@ -139,7 +140,7 @@ export class Player {
 
       // Load electrocution animation (played on wrong lane-quiz answer)
       try {
-        const shockGltf = await loader.loadAsync('/models/Being%20Electrocuted.glb');
+        const shockGltf = await loader.loadAsync(`${BASE}models/Being%20Electrocuted.glb`);
         if (shockGltf.animations.length > 0) {
           const shockAction = this.mixer.clipAction(shockGltf.animations[0]);
           shockAction.setLoop(THREE.LoopOnce);
@@ -153,7 +154,7 @@ export class Player {
 
       // Load stumble animation (played on hitting a jump/slide obstacle)
       try {
-        const stumbleGltf = await loader.loadAsync('/models/Jogging%20Stumble.glb');
+        const stumbleGltf = await loader.loadAsync(`${BASE}models/Jogging%20Stumble.glb`);
         if (stumbleGltf.animations.length > 0) {
           const stumbleAction = this.mixer.clipAction(stumbleGltf.animations[0]);
           stumbleAction.setLoop(THREE.LoopOnce);
@@ -168,7 +169,7 @@ export class Player {
       // Load fall-back death animation (played on a second stumble - the
       // strike that actually ends the run from a jump/slide obstacle)
       try {
-        const deathGltf = await loader.loadAsync('/models/Falling%20Back%20Death.glb');
+        const deathGltf = await loader.loadAsync(`${BASE}models/Falling%20Back%20Death.glb`);
         if (deathGltf.animations.length > 0) {
           const deathAction = this.mixer.clipAction(deathGltf.animations[0]);
           deathAction.setLoop(THREE.LoopOnce);

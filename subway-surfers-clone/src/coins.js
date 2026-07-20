@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+const BASE = import.meta.env.BASE_URL;
+
 // Plain currency pickups — no AWS service or lesson content attached.
 // (Service-linked collectibles are handled separately by orbs.js, which
 // power the in-run quiz/lesson mechanic.)
@@ -39,7 +41,7 @@ export class CoinManager {
   async loadModel() {
     const loader = new GLTFLoader();
     try {
-      const gltf = await loader.loadAsync('/models/coin.glb');
+      const gltf = await loader.loadAsync(`${BASE}models/coin.glb`);
       this.coinModel = gltf.scene;
       this.coinModel.traverse((child) => {
         if (child.isMesh) child.castShadow = true;
