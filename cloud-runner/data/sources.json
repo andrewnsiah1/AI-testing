@@ -1,0 +1,71 @@
+{
+    "description": "AWS documentation sources to upload to S3 for the Bedrock Knowledge Base",
+    "instructions": [
+        "Download these documents (PDFs or HTML) and upload to the S3 docs bucket.",
+        "Then create/sync the Bedrock Knowledge Base to index them.",
+        "The Knowledge Base will chunk, embed, and make them searchable via RAG."
+    ],
+    "recommended_sources": [
+        {
+            "name": "AWS Well-Architected Framework",
+            "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html",
+            "topics": ["architecture", "best_practices", "pillars"]
+        },
+        {
+            "name": "EC2 User Guide",
+            "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/",
+            "topics": ["ec2", "compute", "instances"]
+        },
+        {
+            "name": "Lambda Developer Guide",
+            "url": "https://docs.aws.amazon.com/lambda/latest/dg/",
+            "topics": ["lambda", "serverless", "functions"]
+        },
+        {
+            "name": "S3 User Guide",
+            "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/",
+            "topics": ["s3", "storage", "buckets"]
+        },
+        {
+            "name": "VPC User Guide",
+            "url": "https://docs.aws.amazon.com/vpc/latest/userguide/",
+            "topics": ["vpc", "networking", "subnets", "security_groups"]
+        },
+        {
+            "name": "IAM User Guide",
+            "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/",
+            "topics": ["iam", "security", "access_control"]
+        },
+        {
+            "name": "DynamoDB Developer Guide",
+            "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/",
+            "topics": ["dynamodb", "nosql", "database"]
+        },
+        {
+            "name": "RDS User Guide",
+            "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/",
+            "topics": ["rds", "database", "sql"]
+        },
+        {
+            "name": "CloudFormation User Guide",
+            "url": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/",
+            "topics": ["cloudformation", "iac", "infrastructure"]
+        },
+        {
+            "name": "ECS Developer Guide",
+            "url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/",
+            "topics": ["ecs", "containers", "fargate"]
+        },
+        {
+            "name": "API Gateway Developer Guide",
+            "url": "https://docs.aws.amazon.com/apigateway/latest/developerguide/",
+            "topics": ["api_gateway", "rest", "http"]
+        },
+        {
+            "name": "Step Functions Developer Guide",
+            "url": "https://docs.aws.amazon.com/step-functions/latest/dg/",
+            "topics": ["step_functions", "workflows", "orchestration"]
+        }
+    ],
+    "tip": "You can also use the AWS Documentation MCP server (awslabs.aws-documentation-mcp-server) to programmatically fetch and prepare these docs."
+}
