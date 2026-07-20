@@ -23,8 +23,8 @@ let gameState = 'start'; // 'start', 'playing', 'over'
 let score = 0;
 let coins = 0;
 let speed = 0.255;
-const MAX_SPEED = 0.55;
-const SPEED_INCREMENT = 0.000035;
+const MAX_SPEED = 0.52;
+const SPEED_INCREMENT = 0.000025;
 
 // Scene setup
 const scene = new THREE.Scene();

@@ -157,12 +157,16 @@ export class ObstacleManager {
     const tooCloseToLastOverhead =
       this.lastOverheadZ !== null && Math.abs(z - this.lastOverheadZ) < MIN_OVERHEAD_GAP;
 
-    // Difficulty ramp: as score increases, 2-lane blocks and trains become
-    // more common so the road gets progressively harder to navigate.
-    // Caps are set so it stays challenging but never impossible — there's
-    // always a viable path the player can take with good reactions.
-    const twoLaneChance = Math.min(0.4, 0.15 + score * 0.0004);
-    const trainChance = Math.min(0.45, 0.3 + score * 0.0002);
+    // Difficulty ramp: gets harder over time but FLUCTUATES — some spawns
+    // are harder than others within the same score range (using random
+    // variance), and the overall ramp is slower so early game stays easy
+    // longer. The `wave` factor oscillates between 0 and 1, adding bursts
+    // of harder/easier moments rather than a flat constant climb.
+    const wave = 0.5 + 0.5 * Math.sin(score * 0.008 + Math.random() * 0.5);
+    const baseTwoLane = Math.min(0.4, 0.08 + score * 0.00025);
+    const baseTrain = Math.min(0.45, 0.2 + score * 0.00015);
+    const twoLaneChance = baseTwoLane * (0.6 + wave * 0.4);
+    const trainChance = baseTrain * (0.6 + wave * 0.4);
 
     // Decide how many lanes to block
     const numLanes = Math.random() < twoLaneChance ? 2 : 1;
@@ -241,9 +245,10 @@ export class ObstacleManager {
     if (allowSpawn && score - this.lastSpawnScore > this.spawnInterval) {
       this.spawn(score);
       this.lastSpawnScore = score;
-      // Spawn interval shrinks as score rises: starts at 30, floors at 12
-      // so there's always breathing room between obstacle groups
-      this.spawnInterval = Math.max(12, 30 - score * 0.02);
+      // Spawn interval shrinks slowly — takes longer for the game to get
+      // dense, and fluctuates slightly so some stretches feel breezier
+      const baseInterval = Math.max(12, 30 - score * 0.015);
+      this.spawnInterval = baseInterval + Math.random() * 5;
     }
 
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
