@@ -9,7 +9,7 @@ const USE_LOCAL_BACKEND = false;
 const API_BASE_URL = USE_LOCAL_BACKEND
   ? 'http://localhost:8000'
   : 'https://ew4z195och.execute-api.us-east-1.amazonaws.com';
-const REQUEST_TIMEOUT_MS = 6000;
+const REQUEST_TIMEOUT_MS = 12000;
 
 async function postJson(path, payload) {
   const controller = new AbortController();
