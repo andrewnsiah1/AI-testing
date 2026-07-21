@@ -52,7 +52,7 @@ class BackendStack(Stack):
             environment={
                 "BEDROCK_KNOWLEDGE_BASE_ID": kb_id,
                 "BEDROCK_MODEL_ID": "anthropic.claude-3-sonnet-20240229-v1:0",
-                "ALLOWED_ORIGINS": game_url,
+                "ALLOWED_ORIGINS": f"{game_url},http://localhost:3000,http://localhost:3001,https://andrewnsiah1.github.io",
             },
             description="Cloud Runner - FastAPI backend for quiz generation and follow-up Q&A, grounded by a Bedrock Knowledge Base",
         )
@@ -75,12 +75,14 @@ class BackendStack(Stack):
         # ============================================================
         # API Gateway HTTP API
         # ============================================================
+        github_pages_url = "https://andrewnsiah1.github.io"
+
         http_api = apigwv2.HttpApi(
             self,
             "CloudRunnerHttpApi",
             api_name="cloud-runner-api",
             cors_preflight=apigwv2.CorsPreflightOptions(
-                allow_origins=[game_url, "http://localhost:3000"],
+                allow_origins=["*"],
                 allow_methods=[apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.POST, apigwv2.CorsHttpMethod.OPTIONS],
                 allow_headers=["Content-Type", "Authorization"],
                 max_age=Duration.hours(1),

@@ -24,15 +24,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS - allow GitHub Pages and local dev
-allowed_origins = os.environ.get(
-    "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000"
-).split(",")
-
+# CORS - allow all origins (public game API)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
