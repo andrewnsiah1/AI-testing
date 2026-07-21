@@ -2,6 +2,7 @@
 
 An educational Subway Surfers-style endless runner that teaches real AWS concepts while you play. Collect AWS service orbs, answer in-run quiz gates, and review what you learned between runs.
 
+Play here: https://andrewnsiah1.github.io/AI-testing/
 ## How to Play
 
 1. Run the game locally (see below) or open your deployed build
