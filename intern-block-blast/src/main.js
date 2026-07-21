@@ -41,7 +41,7 @@ const boardEl = document.getElementById('game-board');
 const trayEl = document.getElementById('piece-tray');
 const scoreEl = document.getElementById('score');
 const levelEl = document.getElementById('level');
-const tipsCountEl = document.getElementById('tips-count');
+const highScoreEl = document.getElementById('high-score');
 
 const quizModal = document.getElementById('quiz-modal');
 const quizCategoryLabel = document.getElementById('quiz-category-label');
@@ -381,7 +381,6 @@ function unlockTip() {
 
 function updateTipsCount() {
   const total = Object.values(collectedTips).reduce((sum, arr) => sum + arr.length, 0);
-  tipsCountEl.textContent = total;
 }
 
 // ----- Quiz System -----
@@ -504,6 +503,12 @@ function showTipsModal(category) {
 
 // ----- Game Over -----
 function gameOver() {
+  // Update high score
+  const prev = parseInt(localStorage.getItem('blockblast-highscore') || '0');
+  if (score > prev) {
+    localStorage.setItem('blockblast-highscore', score);
+  }
+
   document.getElementById('final-score').textContent = score;
   document.getElementById('final-lines').textContent = linesCleared;
   const totalTips = Object.values(collectedTips).reduce((sum, arr) => sum + arr.length, 0);
@@ -575,7 +580,7 @@ function startGame() {
 
   scoreEl.textContent = '0';
   levelEl.textContent = '1';
-  tipsCountEl.textContent = '0';
+  highScoreEl.textContent = localStorage.getItem('blockblast-highscore') || '0';
 
   currentPieces = generatePieceSet(level);
   renderBoard();

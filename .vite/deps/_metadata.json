@@ -1,0 +1,25 @@
+{
+  "hash": "88a9219a",
+  "configHash": "71b638fd",
+  "lockfileHash": "ddd04f27",
+  "browserHash": "30f3449b",
+  "optimized": {
+    "three": {
+      "src": "../../cloud-runner/subway-surfers-clone/node_modules/three/build/three.module.js",
+      "file": "three.js",
+      "fileHash": "52f3fae0",
+      "needsInterop": false
+    },
+    "three/addons/loaders/GLTFLoader.js": {
+      "src": "../../cloud-runner/subway-surfers-clone/node_modules/three/examples/jsm/loaders/GLTFLoader.js",
+      "file": "three_addons_loaders_GLTFLoader__js.js",
+      "fileHash": "8523d6f2",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-SBT72GDT": {
+      "file": "chunk-SBT72GDT.js"
+    }
+  }
+}

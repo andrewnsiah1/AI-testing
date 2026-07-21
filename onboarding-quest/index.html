@@ -82,6 +82,7 @@
           <span>💎 <b id="count">0</b>/<span id="total">0</span></span>
           <span class="bar"><i id="fill"></i></span>
           <span>⭐ <b id="stars">0</b>/<span id="starsTotal">0</span></span>
+          <span style="margin-left:12px; font-size:12px; color:var(--gold);">🏆 Best: <b id="questBest">0</b></span>
         </div>
         <div id="abilities">
           <span class="ability" id="abJump">🖥️ Double Jump</span>
@@ -644,13 +645,13 @@ function winGame(){ if(questBgm){ questBgm.pause(); questBgm.currentTime=0; }
   else if(sc>=Math.ceil(tot*0.6)){ icon="🥈"; label="Silver — great exploring!"; }
   el("rankIcon").textContent=icon;
   el("rankText").textContent=`${label}  ·  ⭐ ${sc}/${tot} stars  ·  ${falls} fall${falls===1?"":"s"}`;
-  buildWinList(); show("win");
+  const prevBest=parseInt(localStorage.getItem("quest-highscore")||"0"); if(sc>prevBest) localStorage.setItem("quest-highscore",sc.toString()); buildWinList(); show("win");
 }
 
 /* ---------- overlays ---------- */
 function show(id){ document.querySelectorAll(".overlay").forEach(o=>o.classList.remove("show")); if(id) el(id).classList.add("show"); }
 function resume(){ show(null); state="play"; }
-let questBgm; function startQuestMusic(){ if(!questBgm){ questBgm=new Audio("./music/bgm.mp3"); questBgm.loop=true; questBgm.volume=0.3; } questBgm.currentTime=0; questBgm.play().catch(()=>{}); } el("startBtn").onclick=()=>{ reset(); resume(); startQuestMusic(); };
+let questBgm; function startQuestMusic(){ if(!questBgm){ questBgm=new Audio("./music/bgm.mp3"); questBgm.loop=true; questBgm.volume=0.3; } questBgm.currentTime=0; questBgm.play().catch(()=>{}); } el("startBtn").onclick=()=>{ reset(); resume(); startQuestMusic(); var qb=el("questBest"); if(qb) qb.textContent=localStorage.getItem("quest-highscore")||"0"; };
 el("mClose").onclick=()=>{ if(state==="win") show("win"); else resume(); };
 el("openList").onclick=()=>{ if(state==="play"){ state="list"; buildChecklist(); show("checklist"); } };
 el("closeList").onclick=()=>resume();

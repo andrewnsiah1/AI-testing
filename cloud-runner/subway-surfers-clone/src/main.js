@@ -127,6 +127,7 @@ let pendingOrbNoteResult = undefined; // undefined = not settled yet, null = set
 const scoreEl = document.getElementById('score');
 const coinsEl = document.getElementById('coins');
 const strikeIndicatorEl = document.getElementById('strike-indicator');
+const highScoreEl = document.getElementById('high-score');
 const gameOverEl = document.getElementById('game-over');
 const gameOverReasonEl = document.getElementById('game-over-reason');
 const startScreenEl = document.getElementById('start-screen');
@@ -737,6 +738,7 @@ document.getElementById('rules-start-btn').addEventListener('click', () => {
   updateStrikeIndicator();
   scheduleNextLaneQuiz(0);
   startMusic();
+  highScoreEl.textContent = `Best: ${localStorage.getItem('cloudrunner-highscore') || '0'}`;
 });
 
 laneQuizNotesToggleEl.addEventListener('click', () => {
@@ -903,6 +905,14 @@ function registerCorrectAnswerForChase() {
 function gameOver(reason) {
   gameState = 'over';
   stopMusic();
+
+  // Update high score
+  const finalScore = Math.floor(score);
+  const prev = parseInt(localStorage.getItem('cloudrunner-highscore') || '0');
+  if (finalScore > prev) {
+    localStorage.setItem('cloudrunner-highscore', finalScore);
+  }
+
   gameOverEl.style.display = 'block';
   gameOverReasonEl.textContent = reason || '';
   finalScoreEl.textContent = Math.floor(score);
