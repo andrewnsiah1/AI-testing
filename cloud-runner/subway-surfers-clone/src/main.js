@@ -912,10 +912,13 @@ function gameOver(reason) {
   if (finalScore > prev) {
     localStorage.setItem('cloudrunner-highscore', finalScore);
   }
+  const best = Math.max(prev, finalScore);
 
   gameOverEl.style.display = 'block';
   gameOverReasonEl.textContent = reason || '';
-  finalScoreEl.textContent = Math.floor(score);
+  finalScoreEl.textContent = finalScore;
+  document.getElementById('final-high-score').textContent = best;
+  highScoreEl.textContent = `Best: ${best}`;
   finalCoinsEl.textContent = coins;
 
   // Cop stops running and stands idle over the player
